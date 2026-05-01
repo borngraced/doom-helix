@@ -1,10 +1,87 @@
 use helix_core::coords_at_pos;
 use helix_view::Editor;
-use serde_json::{json, Value};
+use serde::Serialize;
 
 const MAX_SELECTION_TEXT_CHARS: usize = 2_000;
 
-pub fn current_snapshot(editor: &Editor) -> Value {
+#[derive(Debug, Serialize)]
+pub struct EditorSnapshot {
+    pub workspace_root: String,
+    pub cwd: String,
+    pub theme: String,
+    pub mode: String,
+    pub active_file: ActiveFileSnapshot,
+    pub cursor: CursorSnapshot,
+    pub visible_ranges: Vec<VisibleRangeSnapshot>,
+    pub selections: Vec<SelectionSnapshot>,
+    pub open_buffers: Vec<BufferSnapshot>,
+    pub diagnostics: Vec<DiagnosticSnapshot>,
+    pub recent_commands: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ActiveFileSnapshot {
+    pub id: String,
+    pub display_name: String,
+    pub path: Option<String>,
+    pub language: Option<String>,
+    pub language_id: Option<String>,
+    pub modified: bool,
+    pub line_ending: String,
+    pub encoding: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CursorSnapshot {
+    pub line: usize,
+    pub column: usize,
+    pub char: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VisibleRangeSnapshot {
+    pub file: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SelectionSnapshot {
+    pub index: usize,
+    pub primary: bool,
+    pub anchor: usize,
+    pub head: usize,
+    pub start: PositionSnapshot,
+    pub end: PositionSnapshot,
+    pub text: String,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PositionSnapshot {
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BufferSnapshot {
+    pub id: String,
+    pub display_name: String,
+    pub path: Option<String>,
+    pub language: Option<String>,
+    pub modified: bool,
+    pub diagnostics: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticSnapshot {
+    pub line: usize,
+    pub severity: Option<String>,
+    pub source: Option<String>,
+    pub message: String,
+}
+
+pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
     let (view, doc) = current_ref!(editor);
     let text = doc.text().slice(..);
     let selection = doc.selection(view.id);
@@ -19,7 +96,7 @@ pub fn current_snapshot(editor: &Editor) -> Value {
     let visible_start = coords_at_pos(text, view_offset.anchor).row;
     let visible_end = visible_start.saturating_add(view.area.height as usize);
 
-    let selections: Vec<Value> = selection
+    let selections = selection
         .ranges()
         .iter()
         .enumerate()
@@ -32,77 +109,79 @@ pub fn current_snapshot(editor: &Editor) -> Value {
                 .take(MAX_SELECTION_TEXT_CHARS)
                 .collect::<String>();
 
-            json!({
-                "index": index,
-                "primary": index == selection.primary_index(),
-                "anchor": range.anchor,
-                "head": range.head,
-                "start": { "line": start.row, "column": start.col },
-                "end": { "line": end.row, "column": end.col },
-                "text": selected_text,
-                "truncated": range.len() > MAX_SELECTION_TEXT_CHARS,
-            })
+            SelectionSnapshot {
+                index,
+                primary: index == selection.primary_index(),
+                anchor: range.anchor,
+                head: range.head,
+                start: PositionSnapshot {
+                    line: start.row,
+                    column: start.col,
+                },
+                end: PositionSnapshot {
+                    line: end.row,
+                    column: end.col,
+                },
+                text: selected_text,
+                truncated: range.len() > MAX_SELECTION_TEXT_CHARS,
+            }
         })
         .collect();
 
-    let open_buffers: Vec<Value> = editor
+    let open_buffers = editor
         .documents()
-        .map(|doc| {
-            json!({
-                "id": doc.id().to_string(),
-                "display_name": doc.display_name().to_string(),
-                "path": doc.path().map(|path| path.display().to_string()),
-                "language": doc.language_name(),
-                "modified": doc.is_modified(),
-                "diagnostics": doc.diagnostics().len(),
-            })
+        .map(|doc| BufferSnapshot {
+            id: doc.id().to_string(),
+            display_name: doc.display_name().to_string(),
+            path: doc.path().map(|path| path.display().to_string()),
+            language: doc.language_name().map(ToOwned::to_owned),
+            modified: doc.is_modified(),
+            diagnostics: doc.diagnostics().len(),
         })
         .collect();
 
-    let diagnostics: Vec<Value> = doc
+    let diagnostics = doc
         .diagnostics()
         .iter()
         .take(50)
-        .map(|diagnostic| {
-            json!({
-                "line": diagnostic.line,
-                "severity": diagnostic.severity,
-                "source": diagnostic.source,
-                "message": diagnostic.message,
-            })
+        .map(|diagnostic| DiagnosticSnapshot {
+            line: diagnostic.line,
+            severity: diagnostic.severity.map(|severity| format!("{severity:?}")),
+            source: diagnostic.source.clone(),
+            message: diagnostic.message.clone(),
         })
         .collect();
 
-    json!({
-        "workspace_root": workspace_root.display().to_string(),
-        "cwd": cwd.display().to_string(),
-        "theme": editor.theme.name(),
-        "mode": format!("{:?}", editor.mode()).to_lowercase(),
-        "active_file": {
-            "id": doc.id().to_string(),
-            "display_name": doc.display_name().to_string(),
-            "path": doc.path().map(|path| path.display().to_string()),
-            "language": doc.language_name(),
-            "language_id": doc.language_id(),
-            "modified": doc.is_modified(),
-            "line_ending": doc.line_ending.as_str(),
-            "encoding": doc.encoding().name(),
+    EditorSnapshot {
+        workspace_root: workspace_root.display().to_string(),
+        cwd: cwd.display().to_string(),
+        theme: editor.theme.name().to_string(),
+        mode: format!("{:?}", editor.mode()).to_lowercase(),
+        active_file: ActiveFileSnapshot {
+            id: doc.id().to_string(),
+            display_name: doc.display_name().to_string(),
+            path: doc.path().map(|path| path.display().to_string()),
+            language: doc.language_name().map(ToOwned::to_owned),
+            language_id: doc.language_id().map(ToOwned::to_owned),
+            modified: doc.is_modified(),
+            line_ending: doc.line_ending.as_str().to_string(),
+            encoding: doc.encoding().name().to_string(),
         },
-        "cursor": {
-            "line": cursor.row,
-            "column": cursor.col,
-            "char": primary.head,
+        cursor: CursorSnapshot {
+            line: cursor.row,
+            column: cursor.col,
+            char: primary.head,
         },
-        "visible_ranges": [{
-            "file": doc.display_name().to_string(),
-            "start_line": visible_start,
-            "end_line": visible_end,
+        visible_ranges: vec![VisibleRangeSnapshot {
+            file: doc.display_name().to_string(),
+            start_line: visible_start,
+            end_line: visible_end,
         }],
-        "selections": selections,
-        "open_buffers": open_buffers,
-        "diagnostics": diagnostics,
-        "recent_commands": [],
-    })
+        selections,
+        open_buffers,
+        diagnostics,
+        recent_commands: Vec::new(),
+    }
 }
 
 pub fn current_snapshot_pretty(editor: &Editor) -> anyhow::Result<String> {
