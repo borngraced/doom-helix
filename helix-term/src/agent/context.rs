@@ -112,6 +112,15 @@ pub struct FileChangeSnapshot {
 
 pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
     let (view, doc) = current_ref!(editor);
+    let transcript_doc_id = super::runtime::transcript_doc_id();
+    let doc = if doc.path().is_none() && Some(doc.id()) == transcript_doc_id {
+        editor
+            .documents()
+            .find(|document| document.path().is_some() && Some(document.id()) != transcript_doc_id)
+            .unwrap_or(doc)
+    } else {
+        doc
+    };
     let text = doc.text().slice(..);
     let selection = doc.selection(view.id);
     let primary = selection.primary();

@@ -699,7 +699,7 @@ fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Re
         let contents = agent_turn_markdown(&turn)?;
         let request_id = turn.request_id;
         Ok(job::Callback::Editor(Box::new(move |editor| {
-            if let Err(err) = open_agent_markdown_scratch_editor(editor, contents) {
+            if let Err(err) = append_agent_transcript_editor(editor, contents) {
                 editor.set_error(err.to_string());
             } else {
                 editor.set_status(format!("Agent turn #{request_id} complete"));
@@ -720,6 +720,7 @@ fn agent_status_message() -> String {
             name,
             session_id,
             next_request_id,
+            transcript_doc_id: _,
         } => {
             let session = session_id.as_deref().unwrap_or("<pending>");
             format!("Agent '{name}' is running, session {session}, next request #{next_request_id}")
@@ -736,8 +737,34 @@ fn open_agent_json_scratch_editor(editor: &mut Editor, contents: String) -> anyh
     open_agent_scratch_editor(editor, contents, "json")
 }
 
-fn open_agent_markdown_scratch_editor(editor: &mut Editor, contents: String) -> anyhow::Result<()> {
-    open_agent_scratch_editor(editor, contents, "markdown")
+fn append_agent_transcript_editor(editor: &mut Editor, contents: String) -> anyhow::Result<()> {
+    let doc_id = crate::agent::runtime::transcript_doc_id()
+        .filter(|doc_id| editor.document(*doc_id).is_some())
+        .unwrap_or_else(|| {
+            let doc_id = editor.new_file(Action::HorizontalSplit);
+            crate::agent::runtime::set_transcript_doc_id(doc_id);
+            doc_id
+        });
+
+    editor.switch(doc_id, Action::Replace);
+    let view_id = view!(editor).id;
+    let loader = editor.syn_loader.load();
+    let doc = doc_mut!(editor, &doc_id);
+    doc.ensure_view_init(view_id);
+
+    let prefix = if doc.text().len_chars() == 0 {
+        String::new()
+    } else {
+        "\n\n---\n\n".to_string()
+    };
+    let insertion = format!("{prefix}{contents}");
+    let insert_at = doc.text().len_chars();
+    let selection = Selection::point(insert_at);
+    let transaction = Transaction::insert(doc.text(), &selection, insertion.into());
+    doc.apply(&transaction, view_id);
+    doc.set_language_by_language_id("markdown", &loader).ok();
+
+    Ok(())
 }
 
 fn open_agent_scratch_editor(
@@ -759,9 +786,7 @@ fn open_agent_scratch_editor(
 }
 
 fn agent_turn_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyhow::Result<String> {
-    let mut output = String::new();
-    writeln!(output, "**You:** {}", turn.prompt)?;
-    output.push_str("\n\n**Codex:**\n\n");
+    let mut response = String::new();
 
     for message in &turn.messages {
         let value = serde_json::to_value(message)?;
@@ -790,23 +815,26 @@ fn agent_turn_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyhow::Resul
         };
 
         match update_kind {
-            "agent_message_chunk" => output.push_str(text),
+            "agent_message_chunk" => response.push_str(text),
             "agent_thought_chunk" => {
-                writeln!(output, "\n\n> {text}")?;
+                writeln!(response, "\n\n> {text}")?;
             }
             "user_message_chunk" => {}
             _ => {
-                writeln!(output, "\n\n`{update_kind}`: {text}")?;
+                writeln!(response, "\n\n`{update_kind}`: {text}")?;
             }
         }
     }
 
-    let empty_response = output.trim_end() == format!("**You:** {}\n\n**Codex:**", turn.prompt);
-    if empty_response {
-        output = serde_json::to_string_pretty(turn)?;
+    if response.trim().is_empty() {
+        return Ok(serde_json::to_string_pretty(turn)?);
     }
 
-    Ok(output)
+    Ok(format!(
+        "**You:**\n\n{}\n\n**Codex:**\n\n{}\n",
+        turn.prompt.trim(),
+        response.trim()
+    ))
 }
 
 fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
