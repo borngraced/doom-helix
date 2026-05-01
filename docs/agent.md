@@ -92,6 +92,10 @@ There is one agent transcript per running agent runtime; new chat/action turns a
 
 Restores the single agent transcript panel from the saved transcript state if the split was closed. This does not restart the agent or create a new conversation.
 
+`:agent raw`
+
+Opens a raw markdown copy of the transcript for exact cursor movement, selection, and copying without changing the rendered agent panel.
+
 `:agent next`
 
 Moves the cursor to the next turn in the agent transcript.
@@ -182,6 +186,7 @@ a = ":agent apply"
 p = ":agent patch"
 P = ":agent panel"
 R = ":agent restore"
+o = ":agent raw"
 s = ":agent start"
 x = ":agent clear"
 S = ":agent status"

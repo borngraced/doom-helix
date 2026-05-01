@@ -38,6 +38,7 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "panel",
     "patch",
     "prev",
+    "raw",
     "start",
     "status",
     "stop",
@@ -782,6 +783,18 @@ fn open_agent_panel(cx: &mut compositor::Context, status: &'static str) {
     }
     render_agent_transcript_editor(cx.editor, doc_id, view_id);
     cx.editor.set_status(status);
+}
+
+fn open_agent_raw_transcript(cx: &mut compositor::Context) -> anyhow::Result<()> {
+    let contents = crate::agent::runtime::render_transcript();
+    if contents.trim().is_empty() {
+        cx.editor.set_status("No agent transcript is available");
+        return Ok(());
+    }
+
+    open_agent_named_scratch_editor(cx.editor, contents, "markdown", "[agent raw]", true)?;
+    cx.editor.set_status("Agent raw transcript opened");
+    Ok(())
 }
 
 fn clear_agent_panel(cx: &mut compositor::Context) {
@@ -2011,6 +2024,7 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("refactor") => refactor_agent(cx),
         Some("edit") => edit_agent(cx),
         Some("patch") => open_agent_patch(cx),
+        Some("raw") => open_agent_raw_transcript(cx),
         Some("apply") => {
             apply_agent_patch(cx);
             Ok(())

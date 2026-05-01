@@ -138,7 +138,7 @@ impl EditorView {
 
         let view_offset = doc.view_offset(view.id);
 
-        if Self::is_agent_transcript_doc(doc) && !is_focused {
+        if Self::is_agent_transcript_doc(doc) {
             self.render_agent_transcript_markdown(editor, doc, view, surface);
             self.render_view_border_and_statusline(
                 editor, doc, view, viewport, surface, is_focused,
