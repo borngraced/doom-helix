@@ -66,6 +66,11 @@ Starts the configured agent first if needed.
 Asks Codex to suggest a clean refactor for the current primary selection without editing files.
 Starts the configured agent first if needed.
 
+`:agent edit`
+
+Asks Codex to return a unified diff patch proposal for the current primary selection. This is read-only: Helix appends the patch proposal to the transcript and does not apply it.
+Starts the configured agent first if needed.
+
 `:agent panel`
 
 Opens or focuses the agent transcript buffer. The split direction follows `[editor.agent].panel-position`.
@@ -159,6 +164,7 @@ c = ":agent chat"
 e = ":agent explain"
 f = ":agent fix"
 r = ":agent refactor"
+E = ":agent edit"
 p = ":agent panel"
 s = ":agent start"
 x = ":agent clear"
@@ -169,9 +175,10 @@ c = ":agent chat"
 e = ":agent explain"
 f = ":agent fix"
 r = ":agent refactor"
+E = ":agent edit"
 ```
 
-With this map, select code and press `<space>a e` to explain it, `<space>a f` to ask for a fix proposal, or `<space>a r` to ask for a refactor proposal.
+With this map, select code and press `<space>a e` to explain it, `<space>a f` to ask for a fix proposal, `<space>a r` to ask for a refactor proposal, or `<space>a E` to ask for a unified diff edit proposal.
 
 ## Near-Term Direction
 

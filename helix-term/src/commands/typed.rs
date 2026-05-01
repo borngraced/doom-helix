@@ -22,6 +22,7 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "chat",
     "clear",
     "context",
+    "edit",
     "explain",
     "fix",
     "refactor",
@@ -725,6 +726,14 @@ fn refactor_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
     )
 }
 
+fn edit_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
+    prompt_agent_turn(
+        cx,
+        "Propose an edit for this selected code. Return a unified diff patch only, with enough surrounding context to review. Do not modify files."
+            .to_string(),
+    )
+}
+
 fn open_agent_panel(cx: &mut compositor::Context) {
     let position = cx.editor.config().agent.panel_position;
     let action = agent_panel_action(position);
@@ -1039,6 +1048,7 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("explain") => explain_agent(cx),
         Some("fix") => fix_agent(cx),
         Some("refactor") => refactor_agent(cx),
+        Some("edit") => edit_agent(cx),
         Some("panel") => {
             open_agent_panel(cx);
             Ok(())
