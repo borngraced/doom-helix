@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::session::{self, AgentSession};
@@ -18,6 +18,49 @@ pub struct JsonRpcNotification {
     pub jsonrpc: &'static str,
     pub method: &'static str,
     pub params: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum JsonRpcMessage {
+    Response(JsonRpcResponse),
+    Request(JsonRpcInboundRequest),
+    Notification(JsonRpcInboundNotification),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JsonRpcResponse {
+    pub jsonrpc: Option<String>,
+    pub id: u64,
+    #[serde(default)]
+    pub result: Option<Value>,
+    #[serde(default)]
+    pub error: Option<JsonRpcError>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JsonRpcError {
+    pub code: i64,
+    pub message: String,
+    #[serde(default)]
+    pub data: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JsonRpcInboundRequest {
+    pub jsonrpc: Option<String>,
+    pub id: u64,
+    pub method: String,
+    #[serde(default)]
+    pub params: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JsonRpcInboundNotification {
+    pub jsonrpc: Option<String>,
+    pub method: String,
+    #[serde(default)]
+    pub params: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
