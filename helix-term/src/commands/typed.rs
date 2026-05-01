@@ -816,7 +816,6 @@ fn agent_status_message() -> String {
             name,
             session_id,
             next_request_id,
-            transcript_doc_id: _,
         } => {
             let session = session_id.as_deref().unwrap_or("<pending>");
             format!("Agent '{name}' is running, session {session}, next request #{next_request_id}")

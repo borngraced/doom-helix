@@ -11,6 +11,7 @@ use super::{
 
 runtime_local! {
     static AGENT_RUNTIME: Mutex<Option<RunningAgent>> = Mutex::new(None);
+    static AGENT_TRANSCRIPT: Mutex<Option<DocumentId>> = Mutex::new(None);
 }
 
 pub struct RunningAgent {
@@ -18,7 +19,6 @@ pub struct RunningAgent {
     pub process: AgentProcess,
     pub session_id: Option<String>,
     pub next_request_id: u64,
-    pub transcript_doc_id: Option<DocumentId>,
 }
 
 pub async fn start(
@@ -40,7 +40,6 @@ pub async fn start(
         process,
         session_id: None,
         next_request_id: 3,
-        transcript_doc_id: None,
     });
 
     Ok(())
@@ -210,7 +209,6 @@ pub fn status() -> AgentRuntimeStatus {
             name: agent.name.clone(),
             session_id: agent.session_id.clone(),
             next_request_id: agent.next_request_id,
-            transcript_doc_id: agent.transcript_doc_id,
         },
         None => AgentRuntimeStatus::Stopped,
     }
@@ -222,24 +220,20 @@ pub enum AgentRuntimeStatus {
         name: String,
         session_id: Option<String>,
         next_request_id: u64,
-        transcript_doc_id: Option<DocumentId>,
     },
     Stopped,
 }
 
 pub fn transcript_doc_id() -> Option<DocumentId> {
-    let agent = AGENT_RUNTIME.lock().expect("agent runtime lock poisoned");
-    agent.as_ref().and_then(|agent| agent.transcript_doc_id)
+    *AGENT_TRANSCRIPT
+        .lock()
+        .expect("agent transcript lock poisoned")
 }
 
 pub fn set_transcript_doc_id(doc_id: DocumentId) {
-    if let Some(agent) = AGENT_RUNTIME
+    *AGENT_TRANSCRIPT
         .lock()
-        .expect("agent runtime lock poisoned")
-        .as_mut()
-    {
-        agent.transcript_doc_id = Some(doc_id);
-    }
+        .expect("agent transcript lock poisoned") = Some(doc_id);
 }
 
 fn update_session_id(agent: &mut RunningAgent, message: &JsonRpcMessage) {
