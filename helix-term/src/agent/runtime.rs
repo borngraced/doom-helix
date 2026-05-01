@@ -2,7 +2,10 @@ use helix_event::runtime_local;
 use helix_view::editor::AgentLaunchConfig;
 use std::sync::Mutex;
 
-use super::{acp::JsonRpcRequest, transport::AgentProcess};
+use super::{
+    acp::{JsonRpcMessage, JsonRpcRequest},
+    transport::AgentProcess,
+};
 
 runtime_local! {
     static AGENT_RUNTIME: Mutex<Option<RunningAgent>> = Mutex::new(None);
@@ -44,9 +47,24 @@ pub async fn stop() -> anyhow::Result<Option<String>> {
     Ok(Some(running.name))
 }
 
+pub async fn recv_next() -> anyhow::Result<JsonRpcMessage> {
+    let Some(mut running) = take_running_agent() else {
+        anyhow::bail!("no agent is running");
+    };
+
+    let message = running.process.recv().await;
+    restore_running_agent(running);
+    message
+}
+
 fn take_running_agent() -> Option<RunningAgent> {
     let mut agent = AGENT_RUNTIME.lock().expect("agent runtime lock poisoned");
     agent.take()
+}
+
+fn restore_running_agent(running: RunningAgent) {
+    let mut agent = AGENT_RUNTIME.lock().expect("agent runtime lock poisoned");
+    *agent = Some(running);
 }
 
 pub fn status() -> AgentRuntimeStatus {

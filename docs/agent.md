@@ -38,6 +38,10 @@ Reports whether an agent process is currently registered as running.
 
 Stops the registered agent process and clears the runtime slot.
 
+`:agent recv`
+
+Reads one framed JSON-RPC message from the running agent process and opens it in a JSON scratch buffer.
+
 `:agent-context`
 
 Compatibility command that opens the same context snapshot directly.

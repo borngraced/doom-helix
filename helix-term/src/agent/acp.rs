@@ -20,7 +20,7 @@ pub struct JsonRpcNotification {
     pub params: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum JsonRpcMessage {
     Response(JsonRpcResponse),
@@ -28,7 +28,7 @@ pub enum JsonRpcMessage {
     Notification(JsonRpcInboundNotification),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct JsonRpcResponse {
     pub jsonrpc: Option<String>,
     pub id: u64,
@@ -38,7 +38,7 @@ pub struct JsonRpcResponse {
     pub error: Option<JsonRpcError>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct JsonRpcError {
     pub code: i64,
     pub message: String,
@@ -46,7 +46,7 @@ pub struct JsonRpcError {
     pub data: Option<Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct JsonRpcInboundRequest {
     pub jsonrpc: Option<String>,
     pub id: u64,
@@ -55,7 +55,7 @@ pub struct JsonRpcInboundRequest {
     pub params: Option<Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct JsonRpcInboundNotification {
     pub jsonrpc: Option<String>,
     pub method: String,

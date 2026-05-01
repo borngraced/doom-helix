@@ -624,6 +624,18 @@ fn stop_agent(cx: &mut compositor::Context) {
     });
 }
 
+fn recv_agent(cx: &mut compositor::Context) {
+    cx.jobs.callback(async move {
+        let message = crate::agent::runtime::recv_next().await?;
+        let contents = serde_json::to_string_pretty(&message)?;
+        Ok(job::Callback::Editor(Box::new(move |editor| {
+            if let Err(err) = open_agent_json_scratch_editor(editor, contents) {
+                editor.set_error(err.to_string());
+            }
+        })))
+    });
+}
+
 fn show_agent_status(cx: &mut compositor::Context) {
     match crate::agent::runtime::status() {
         crate::agent::runtime::AgentRuntimeStatus::Running { name } => {
@@ -636,10 +648,14 @@ fn show_agent_status(cx: &mut compositor::Context) {
 }
 
 fn open_agent_json_scratch(cx: &mut compositor::Context, contents: String) -> anyhow::Result<()> {
-    let doc_id = cx.editor.new_file(Action::HorizontalSplit);
-    let view_id = view!(cx.editor).id;
-    let loader = cx.editor.syn_loader.load();
-    let doc = doc_mut!(cx.editor, &doc_id);
+    open_agent_json_scratch_editor(cx.editor, contents)
+}
+
+fn open_agent_json_scratch_editor(editor: &mut Editor, contents: String) -> anyhow::Result<()> {
+    let doc_id = editor.new_file(Action::HorizontalSplit);
+    let view_id = view!(editor).id;
+    let loader = editor.syn_loader.load();
+    let doc = doc_mut!(editor, &doc_id);
     doc.ensure_view_init(view_id);
     let selection = Selection::point(0);
     let transaction = Transaction::insert(doc.text(), &selection, contents.into());
@@ -662,6 +678,10 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("start") => start_agent(cx),
         Some("stop") => {
             stop_agent(cx);
+            Ok(())
+        }
+        Some("recv") => {
+            recv_agent(cx);
             Ok(())
         }
         Some("status") => {
