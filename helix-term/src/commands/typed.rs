@@ -20,6 +20,7 @@ use ui::completers::{self, Completer};
 const AGENT_SUBCOMMANDS: &[&str] = &[
     "ask",
     "chat",
+    "clear",
     "context",
     "explain",
     "fix",
@@ -735,6 +736,22 @@ fn open_agent_panel(cx: &mut compositor::Context) {
     cx.editor.set_status("Agent panel focused");
 }
 
+fn clear_agent_panel(cx: &mut compositor::Context) {
+    let Some(doc_id) = crate::agent::runtime::transcript_doc_id()
+        .filter(|doc_id| cx.editor.document(*doc_id).is_some())
+    else {
+        cx.editor.set_status("No agent transcript to clear");
+        return;
+    };
+
+    let view_id = prepare_agent_transcript_doc(cx.editor, doc_id);
+    let doc = doc_mut!(cx.editor, &doc_id);
+    let transaction = Transaction::delete(doc.text(), [(0, doc.text().len_chars())].into_iter());
+    doc.apply(&transaction, view_id);
+    doc.set_selection(view_id, Selection::point(0));
+    cx.editor.set_status("Agent transcript cleared");
+}
+
 fn agent_panel_action(position: AgentPanelPosition) -> Action {
     match position {
         AgentPanelPosition::Left | AgentPanelPosition::Right => Action::VerticalSplit,
@@ -896,6 +913,7 @@ fn agent_transcript_doc_id(editor: &mut Editor, action: Action) -> (helix_view::
     }
 
     let doc_id = editor.new_file(action);
+    doc_mut!(editor, &doc_id).set_display_name("[agent]");
     crate::agent::runtime::set_transcript_doc_id(doc_id);
     (doc_id, true)
 }
@@ -1024,6 +1042,10 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("refactor") => refactor_agent(cx),
         Some("panel") => {
             open_agent_panel(cx);
+            Ok(())
+        }
+        Some("clear") => {
+            clear_agent_panel(cx);
             Ok(())
         }
         Some("status") => {

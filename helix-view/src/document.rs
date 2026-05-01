@@ -158,6 +158,7 @@ pub struct Document {
     pub inlay_hints_oudated: bool,
 
     path: Option<PathBuf>,
+    display_name: Option<String>,
     relative_path: OnceCell<Option<PathBuf>>,
     encoding: &'static encoding::Encoding,
     has_bom: bool,
@@ -725,6 +726,7 @@ impl Document {
             id: DocumentId::default(),
             active_snippet: None,
             path: None,
+            display_name: None,
             relative_path: OnceCell::new(),
             encoding,
             has_bom,
@@ -1338,6 +1340,10 @@ impl Document {
 
         self.detect_readonly();
         self.pickup_last_saved_time();
+    }
+
+    pub fn set_display_name(&mut self, display_name: impl Into<String>) {
+        self.display_name = Some(display_name.into());
     }
 
     /// Set the programming language for the file and load associated data (e.g. highlighting)
@@ -2076,6 +2082,10 @@ impl Document {
     }
 
     pub fn display_name(&self) -> Cow<'_, str> {
+        if let Some(display_name) = &self.display_name {
+            return display_name.into();
+        }
+
         self.relative_path()
             .map_or_else(|| SCRATCH_BUFFER_NAME.into(), |path| path.to_string_lossy())
     }

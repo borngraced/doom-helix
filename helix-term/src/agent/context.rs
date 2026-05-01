@@ -85,6 +85,7 @@ pub struct BufferSnapshot {
     pub language: Option<String>,
     pub modified: bool,
     pub diagnostics: usize,
+    pub agent_transcript: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -180,6 +181,7 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
             language: doc.language_name().map(ToOwned::to_owned),
             modified: doc.is_modified(),
             diagnostics: doc.diagnostics().len(),
+            agent_transcript: Some(doc.id()) == transcript_doc_id,
         })
         .collect();
 

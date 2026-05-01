@@ -71,6 +71,10 @@ Starts the configured agent first if needed.
 Opens or focuses the agent transcript buffer. The split direction follows `[editor.agent].panel-position`.
 There is one agent transcript per running agent runtime; new chat/action turns append to that transcript.
 
+`:agent clear`
+
+Clears the agent transcript buffer without stopping the running agent process.
+
 `:agent-context`
 
 Compatibility command that opens the same context snapshot directly.
@@ -157,6 +161,7 @@ f = ":agent fix"
 r = ":agent refactor"
 p = ":agent panel"
 s = ":agent start"
+x = ":agent clear"
 S = ":agent status"
 
 [keys.select.space.a]
