@@ -129,14 +129,14 @@ impl StdioAgentProcess {
     }
 
     async fn send<T: Serialize>(&mut self, message: &T) -> anyhow::Result<()> {
-        let frame = encode_content_length_message(message)?;
+        let frame = encode_newline_message(message)?;
         self.stdin.write_all(&frame).await?;
         self.stdin.flush().await?;
         Ok(())
     }
 
     async fn recv<T: DeserializeOwned>(&mut self) -> anyhow::Result<T> {
-        read_content_length_message(&mut self.stdout).await
+        read_newline_message(&mut self.stdout).await
     }
 
     fn try_wait(&mut self) -> anyhow::Result<Option<std::process::ExitStatus>> {
@@ -303,50 +303,27 @@ impl WebSocketAgentProcess {
     }
 }
 
-pub fn encode_content_length_message<T: Serialize>(message: &T) -> anyhow::Result<Vec<u8>> {
+pub fn encode_newline_message<T: Serialize>(message: &T) -> anyhow::Result<Vec<u8>> {
     let body = serde_json::to_string(message)?;
-    Ok(encode_json_content_length_message(&body))
+    Ok(encode_json_newline_message(&body))
 }
 
-pub fn encode_json_content_length_message(body: &str) -> Vec<u8> {
-    let mut message = Vec::with_capacity(
-        "Content-Length: \r\n\r\n".len() + body.len().to_string().len() + body.len(),
-    );
-    message.extend_from_slice(format!("Content-Length: {}\r\n\r\n", body.len()).as_bytes());
+pub fn encode_json_newline_message(body: &str) -> Vec<u8> {
+    let mut message = Vec::with_capacity(body.len() + 1);
     message.extend_from_slice(body.as_bytes());
+    message.push(b'\n');
     message
 }
 
-pub async fn read_content_length_message<T: DeserializeOwned>(
+pub async fn read_newline_message<T: DeserializeOwned>(
     reader: &mut (impl AsyncBufRead + Unpin),
 ) -> anyhow::Result<T> {
-    let mut buffer = String::new();
-    let mut content_length = None;
-
-    loop {
-        buffer.clear();
-        if reader.read_line(&mut buffer).await? == 0 {
-            anyhow::bail!("agent stream closed while reading message header");
-        }
-
-        if buffer == "\r\n" {
-            break;
-        }
-
-        let Some((name, value)) = buffer.trim().split_once(": ") else {
-            continue;
-        };
-
-        if name.eq_ignore_ascii_case("Content-Length") {
-            content_length = Some(value.parse::<usize>()?);
-        }
+    let mut line = String::new();
+    if reader.read_line(&mut line).await? == 0 {
+        anyhow::bail!("agent stream closed while reading message");
     }
 
-    let content_length =
-        content_length.ok_or_else(|| anyhow::anyhow!("agent message is missing Content-Length"))?;
-    let mut content = vec![0; content_length];
-    reader.read_exact(&mut content).await?;
-    Ok(serde_json::from_slice(&content)?)
+    Ok(serde_json::from_str(line.trim_end_matches(['\r', '\n']))?)
 }
 
 #[cfg(test)]
@@ -357,17 +334,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn encodes_content_length_frame() {
-        let message = encode_json_content_length_message(r#"{"jsonrpc":"2.0"}"#);
+    fn encodes_newline_frame() {
+        let message = encode_json_newline_message(r#"{"jsonrpc":"2.0"}"#);
         assert_eq!(
             String::from_utf8(message).unwrap(),
-            "Content-Length: 17\r\n\r\n{\"jsonrpc\":\"2.0\"}"
+            "{\"jsonrpc\":\"2.0\"}\n"
         );
     }
 
     #[test]
     fn encodes_serializable_message() {
-        let message = encode_content_length_message(&json!({
+        let message = encode_newline_message(&json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "initialize"
@@ -375,19 +352,19 @@ mod tests {
         .unwrap();
 
         let message = String::from_utf8(message).unwrap();
-        assert!(message.starts_with("Content-Length: "));
-        assert!(message.ends_with(r#""method":"initialize"}"#));
+        assert!(message.ends_with("}\n"));
+        assert!(message.contains(r#""method":"initialize""#));
     }
 
     #[tokio::test]
-    async fn reads_content_length_frame() {
+    async fn reads_newline_frame() {
         let (mut writer, reader) = duplex(128);
-        let frame = encode_json_content_length_message(r#"{"ok":true}"#);
+        let frame = encode_json_newline_message(r#"{"ok":true}"#);
         writer.write_all(&frame).await.unwrap();
         drop(writer);
 
         let mut reader = tokio::io::BufReader::new(reader);
-        let message: serde_json::Value = read_content_length_message(&mut reader).await.unwrap();
+        let message: serde_json::Value = read_newline_message(&mut reader).await.unwrap();
         assert_eq!(message, json!({ "ok": true }));
     }
 }

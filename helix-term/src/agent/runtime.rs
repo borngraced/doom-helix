@@ -175,6 +175,10 @@ where
         let message = recv_running_message(&mut running).await?;
         update_session_id(&mut running, &message);
         update_busy_agent_session(running.session_id.clone());
+        if let Some(message) = session_new_failure_message(&message) {
+            let _ = running.process.kill().await;
+            anyhow::bail!(message);
+        }
         messages.push(message);
     }
 
@@ -740,4 +744,29 @@ fn update_session_id(agent: &mut RunningAgent, message: &JsonRpcMessage) {
     };
 
     agent.session_id = Some(session_id.to_string());
+}
+
+fn session_new_failure_message(message: &JsonRpcMessage) -> Option<String> {
+    let JsonRpcMessage::Response(response) = message else {
+        return None;
+    };
+
+    if response.id != 2 {
+        return None;
+    }
+
+    if response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("sessionId"))
+        .and_then(|session_id| session_id.as_str())
+        .is_some()
+    {
+        return None;
+    }
+
+    Some(match &response.error {
+        Some(error) => format!("agent session/new failed: {}", error.message),
+        None => "agent session/new response did not include a sessionId".to_string(),
+    })
 }

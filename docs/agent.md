@@ -156,7 +156,7 @@ args = []
 ```
 
 The process-spawning layer resolves the configured `default-agent` from this table.
-Agent servers can use `transport = "stdio"` or `transport = "websocket"`. Stdio servers launch `command` with `args` and speak ACP using `Content-Length` framed JSON-RPC. WebSocket servers connect to `url` and exchange one ACP JSON-RPC message per text or binary WebSocket frame. If a websocket server has `command` and `args`, DoomHelix starts that command before connecting.
+Agent servers can use `transport = "stdio"` or `transport = "websocket"`. Stdio servers launch `command` with `args` and speak ACP using newline-delimited JSON-RPC. WebSocket servers connect to `url` and exchange one ACP JSON-RPC message per text or binary WebSocket frame. If a websocket server has `command` and `args`, DoomHelix starts that command before connecting.
 Use `codex-acp` for Codex. It is the supported adapter for real ACP permission prompts.
 
 `panel-position` controls where a new agent transcript split opens. Supported values are `left`, `right`, `top`, and `bottom`. `panel-size` is stored as a percentage for the intended panel size; the current split implementation opens an equal-sized split, and exact percentage sizing is reserved for a later weighted-split pass.
@@ -197,6 +197,6 @@ With this map, select code and press `<space>a e` to explain it, `<space>a f` to
 The next implementation steps are:
 
 1. Spawn an external ACP-compatible subprocess.
-2. Send `initialize` and `session/new` JSON-RPC messages over stdio using `Content-Length` framing.
+2. Send `initialize` and `session/new` JSON-RPC messages over stdio using newline-delimited JSON-RPC.
 3. Render responses in an agent buffer.
 4. Add explicit permission gates before any write, shell, or command-execution tool.
