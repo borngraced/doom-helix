@@ -2,7 +2,7 @@
 
 This is an experimental DoomHelix surface for exploring editor-native coding agents.
 
-The agent process is intentionally read-only. Codex can explain code and propose patches, while DoomHelix owns the write step: it stores the latest patch proposal, lets the user inspect it, and applies it only after confirmation.
+The bundled Codex adapter uses Codex's long-lived `app-server` protocol. Codex can stream normal chat, request command/file approvals, and keep one backend thread alive across editor turns.
 
 ## Commands
 
@@ -62,17 +62,17 @@ Starts the configured agent first if needed.
 
 `:agent fix`
 
-Asks Codex to identify a problem in the current primary selection and propose a fix without editing files.
+Asks Codex to identify a problem in the current primary selection and propose a fix.
 Starts the configured agent first if needed.
 
 `:agent refactor`
 
-Asks Codex to suggest a clean refactor for the current primary selection without editing files.
+Asks Codex to suggest a clean refactor for the current primary selection.
 Starts the configured agent first if needed.
 
 `:agent edit`
 
-Asks Codex to return a git-apply compatible unified diff patch proposal for the current primary selection. Codex does not write files; DoomHelix stores the patch for `:agent patch` and `:agent apply`.
+Asks Codex to edit the current primary selection. When Codex needs to run commands or write files, DoomHelix prompts for approval.
 Starts the configured agent first if needed.
 
 `:agent patch`
@@ -173,12 +173,12 @@ For Codex, build the experimental adapter first:
 cargo build -p helix-codex-agent
 ```
 
-Then configure DoomHelix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to DoomHelix and forwards prompt turns to `codex exec --skip-git-repo-check --sandbox read-only` with the current editor context included in stdin. It forwards `codex exec` stdout as ACP `agent_message_chunk` updates while the process is still running. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
+Then configure DoomHelix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to DoomHelix, starts `codex app-server --listen stdio://`, creates one Codex thread for the editor session, and forwards prompt turns through `turn/start`. It forwards `item/agentMessage/delta` events as ACP `agent_message_chunk` updates while the turn is still running. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
 
 If installed with `install.sh`, use `doomhelix-codex-agent` in your config instead of
 `target/debug/helix-codex-agent`.
 
-The adapter is intentionally read-only. It should return explanations or proposed patches, not write files directly. For edits, Codex returns a unified diff; DoomHelix previews it with `:agent patch` and applies it with `:agent apply` only after confirmation.
+When Codex requests command execution or file changes, the adapter sends an approval request back to DoomHelix. DoomHelix shows a `[y/N]` prompt with the request details and returns the decision to Codex.
 
 ## Suggested Keymap
 

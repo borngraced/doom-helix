@@ -2,11 +2,10 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::{
     env,
-    io::{self, BufRead, BufReader, Read, Write},
+    io::{self, BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
-    process::{Command, Stdio},
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     thread,
-    time::{SystemTime, UNIX_EPOCH},
 };
 use tungstenite::{accept, Message, WebSocket};
 
@@ -108,20 +107,25 @@ fn handle_agent_message(
             output.write_message(&initialize_response(id, protocol_version)?)?;
         }
         (Some(id), "session/new") => {
-            state.cwd = params
+            let cwd = params
                 .get("cwd")
                 .and_then(Value::as_str)
                 .map(ToOwned::to_owned)
-                .or_else(|| env::current_dir().ok().map(|cwd| cwd.display().to_string()));
-            state.session_id = Some(new_session_id());
+                .or_else(|| env::current_dir().ok().map(|cwd| cwd.display().to_string()))
+                .unwrap_or_else(|| ".".to_string());
+            let app_server = CodexAppServer::start(&cwd)?;
+            let session_id = app_server.thread_id.clone();
+            state.cwd = Some(cwd);
+            state.session_id = Some(session_id.clone());
+            state.app_server = Some(app_server);
             output.write_message(&json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
-                    "sessionId": state.session_id,
+                    "sessionId": session_id,
                     "_meta": {
                         "helixCodexAgent": {
-                            "backend": "codex exec"
+                            "backend": "codex app-server"
                         }
                     }
                 }
@@ -135,7 +139,11 @@ fn handle_agent_message(
                 .to_string();
             let prompt = prompt_text(&params);
             let codex_prompt = codex_prompt(&prompt, params.get("_meta"));
-            run_codex_exec_stream(state.cwd.as_deref(), &codex_prompt, &session_id, output)?;
+            let app_server = state
+                .app_server
+                .as_mut()
+                .context("codex app-server is not running")?;
+            app_server.run_turn(&codex_prompt, &session_id, output)?;
             output.write_message(&json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -158,10 +166,12 @@ fn handle_agent_message(
 struct AgentState {
     session_id: Option<String>,
     cwd: Option<String>,
+    app_server: Option<CodexAppServer>,
 }
 
 trait AgentOutput {
     fn write_message(&mut self, message: &Value) -> Result<()>;
+    fn request_approval(&mut self, id: u64, params: Value) -> Result<Value>;
 }
 
 struct ContentLengthOutput<'a, W: Write> {
@@ -171,6 +181,10 @@ struct ContentLengthOutput<'a, W: Write> {
 impl<W: Write> AgentOutput for ContentLengthOutput<'_, W> {
     fn write_message(&mut self, message: &Value) -> Result<()> {
         write_content_length_message(self.writer, message)
+    }
+
+    fn request_approval(&mut self, _id: u64, _params: Value) -> Result<Value> {
+        Ok(json!({ "decision": "decline" }))
     }
 }
 
@@ -185,6 +199,41 @@ impl AgentOutput for WebSocketOutput<'_> {
             .send(Message::Text(body.into()))
             .context("failed to write websocket message")?;
         Ok(())
+    }
+
+    fn request_approval(&mut self, id: u64, params: Value) -> Result<Value> {
+        self.write_message(&json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "agent/approval",
+            "params": params
+        }))?;
+
+        loop {
+            let message = match self
+                .websocket
+                .read()
+                .context("failed to read approval response")?
+            {
+                Message::Text(text) => serde_json::from_str::<Value>(&text)?,
+                Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes)?,
+                Message::Ping(bytes) => {
+                    self.websocket
+                        .send(Message::Pong(bytes))
+                        .context("failed to write websocket pong")?;
+                    continue;
+                }
+                Message::Pong(_) | Message::Frame(_) => continue,
+                Message::Close(_) => anyhow::bail!("websocket closed while waiting for approval"),
+            };
+
+            if message.get("id").and_then(Value::as_u64) == Some(id) {
+                if let Some(error) = message.get("error") {
+                    anyhow::bail!("approval request failed: {error}");
+                }
+                return Ok(message.get("result").cloned().unwrap_or(Value::Null));
+            }
+        }
     }
 }
 
@@ -215,6 +264,438 @@ fn initialize_response(id: Value, protocol_version: u64) -> Result<Value> {
             "authMethods": []
         }
     }))
+}
+
+struct CodexAppServer {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    thread_id: String,
+    next_request_id: u64,
+    next_client_request_id: u64,
+}
+
+impl Drop for CodexAppServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl CodexAppServer {
+    fn start(cwd: &str) -> Result<Self> {
+        let command = env::var("HELIX_CODEX_COMMAND").unwrap_or_else(|_| "codex".to_string());
+        let mut child = Command::new(command)
+            .arg("app-server")
+            .arg("--listen")
+            .arg("stdio://")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("failed to spawn codex app-server")?;
+
+        if let Some(stderr) = child.stderr.take() {
+            thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().map_while(Result::ok) {
+                    eprintln!("codex app-server: {line}");
+                }
+            });
+        }
+
+        let stdin = child
+            .stdin
+            .take()
+            .context("codex app-server stdin is unavailable")?;
+        let stdout = child
+            .stdout
+            .take()
+            .context("codex app-server stdout is unavailable")?;
+        let mut server = Self {
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+            thread_id: String::new(),
+            next_request_id: 3,
+            next_client_request_id: 10_000,
+        };
+
+        server.send_app_request(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "clientInfo": {
+                    "name": "doomhelix",
+                    "title": "DoomHelix",
+                    "version": env!("CARGO_PKG_VERSION")
+                },
+                "capabilities": {
+                    "experimentalApi": true
+                }
+            }
+        }))?;
+        server.read_app_response(1)?;
+
+        server.send_app_request(json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "thread/start",
+            "params": {
+                "cwd": cwd,
+                "approvalPolicy": "on-request",
+                "approvalsReviewer": "user",
+                "sandbox": "workspace-write",
+                "experimentalRawEvents": false,
+                "persistExtendedHistory": true
+            }
+        }))?;
+        let response = server.read_app_response(2)?;
+        let thread_id = response
+            .get("result")
+            .and_then(|result| result.get("thread"))
+            .and_then(|thread| thread.get("id"))
+            .and_then(Value::as_str)
+            .context("codex app-server thread/start response did not include thread.id")?
+            .to_string();
+        server.thread_id = thread_id;
+        Ok(server)
+    }
+
+    fn run_turn(
+        &mut self,
+        prompt: &str,
+        session_id: &str,
+        output: &mut impl AgentOutput,
+    ) -> Result<()> {
+        let request_id = self.next_request_id;
+        self.next_request_id += 1;
+        self.send_app_request(json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "turn/start",
+            "params": {
+                "threadId": self.thread_id,
+                "input": [
+                    {
+                        "type": "text",
+                        "text": prompt,
+                        "text_elements": []
+                    }
+                ]
+            }
+        }))?;
+
+        let mut turn_id = None;
+        loop {
+            let message = self.read_app_message()?;
+            if self.handle_app_server_request(&message, session_id, output)? {
+                continue;
+            }
+
+            if message.get("id").and_then(Value::as_u64) == Some(request_id) {
+                turn_id = message
+                    .get("result")
+                    .and_then(|result| result.get("turn"))
+                    .and_then(|turn| turn.get("id"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                continue;
+            }
+
+            match message.get("method").and_then(Value::as_str) {
+                Some("turn/started") => {
+                    turn_id = message
+                        .get("params")
+                        .and_then(|params| params.get("turn"))
+                        .and_then(|turn| turn.get("id"))
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned);
+                    write_agent_status(output, session_id, "Thinking...")?;
+                }
+                Some("item/agentMessage/delta") => {
+                    if let Some(delta) = message
+                        .get("params")
+                        .and_then(|params| params.get("delta"))
+                        .and_then(Value::as_str)
+                    {
+                        write_agent_message_chunk(output, session_id, delta)?;
+                    }
+                }
+                Some("item/commandExecution/outputDelta") => {
+                    if let Some(delta) = message
+                        .get("params")
+                        .and_then(|params| params.get("delta"))
+                        .and_then(Value::as_str)
+                    {
+                        write_agent_status(
+                            output,
+                            session_id,
+                            &format!("Command output: {delta}"),
+                        )?;
+                    }
+                }
+                Some("turn/completed") => {
+                    let completed_turn = message
+                        .get("params")
+                        .and_then(|params| params.get("turn"))
+                        .and_then(|turn| turn.get("id"))
+                        .and_then(Value::as_str);
+                    if turn_id.as_deref().is_none() || completed_turn == turn_id.as_deref() {
+                        write_agent_status(output, session_id, "Done")?;
+                        return Ok(());
+                    }
+                }
+                Some("error") => {
+                    let text = message
+                        .get("params")
+                        .and_then(|params| params.get("error"))
+                        .map(|error| error.to_string())
+                        .unwrap_or_else(|| "codex app-server error".to_string());
+                    write_agent_message_chunk(
+                        output,
+                        session_id,
+                        &format!("Agent turn failed:\n\n```text\n{text}\n```"),
+                    )?;
+                }
+                Some("item/started") => {
+                    if let Some(item_type) = message
+                        .get("params")
+                        .and_then(|params| params.get("item"))
+                        .and_then(|item| item.get("type"))
+                        .and_then(Value::as_str)
+                    {
+                        write_agent_status(output, session_id, &format!("Codex: {item_type}"))?;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn handle_app_server_request(
+        &mut self,
+        message: &Value,
+        session_id: &str,
+        output: &mut impl AgentOutput,
+    ) -> Result<bool> {
+        let Some(method) = message.get("method").and_then(Value::as_str) else {
+            return Ok(false);
+        };
+        let Some(id) = message.get("id").cloned() else {
+            return Ok(false);
+        };
+
+        let Some(approval) = app_server_approval_prompt(method, message.get("params")) else {
+            let response = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": -32601,
+                    "message": format!("unsupported codex app-server request: {method}")
+                }
+            });
+            self.send_app_request(response)?;
+            return Ok(true);
+        };
+
+        write_agent_status(
+            output,
+            session_id,
+            &format!("Approval required: {}", approval.title),
+        )?;
+        let client_request_id = self.next_client_request_id;
+        self.next_client_request_id += 1;
+        let client_result = output.request_approval(
+            client_request_id,
+            json!({
+                "title": approval.title,
+                "body": approval.body,
+                "kind": approval.kind,
+            }),
+        )?;
+        let accepted = client_result
+            .get("decision")
+            .and_then(Value::as_str)
+            .is_some_and(|decision| decision == "accept");
+        let response = match method {
+            "item/commandExecution/requestApproval" => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "decision": if accepted { "accept" } else { "decline" }
+                }
+            }),
+            "item/fileChange/requestApproval" => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "decision": if accepted { "accept" } else { "decline" }
+                }
+            }),
+            "applyPatchApproval" => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "decision": if accepted { "approved" } else { "denied" }
+                }
+            }),
+            "execCommandApproval" => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "decision": if accepted { "approved" } else { "denied" }
+                }
+            }),
+            _ => unreachable!(),
+        };
+        self.send_app_request(response)?;
+        Ok(true)
+    }
+
+    fn handle_app_server_request_declined(&mut self, message: &Value) -> Result<bool> {
+        let Some(method) = message.get("method").and_then(Value::as_str) else {
+            return Ok(false);
+        };
+        let Some(id) = message.get("id").cloned() else {
+            return Ok(false);
+        };
+        let Some(_) = app_server_approval_prompt(method, message.get("params")) else {
+            return Ok(false);
+        };
+        let response = match method {
+            "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+                json!({ "jsonrpc": "2.0", "id": id, "result": { "decision": "decline" } })
+            }
+            "applyPatchApproval" | "execCommandApproval" => {
+                json!({ "jsonrpc": "2.0", "id": id, "result": { "decision": "denied" } })
+            }
+            _ => unreachable!(),
+        };
+        self.send_app_request(response)?;
+        Ok(true)
+    }
+
+    fn send_app_request(&mut self, message: Value) -> Result<()> {
+        serde_json::to_writer(&mut self.stdin, &message)?;
+        self.stdin.write_all(b"\n")?;
+        self.stdin.flush()?;
+        Ok(())
+    }
+
+    fn read_app_response(&mut self, id: u64) -> Result<Value> {
+        loop {
+            let message = self.read_app_message()?;
+            if self.handle_app_server_request_declined(&message)? {
+                continue;
+            }
+            if message.get("id").and_then(Value::as_u64) == Some(id) {
+                if let Some(error) = message.get("error") {
+                    anyhow::bail!("codex app-server request {id} failed: {error}");
+                }
+                return Ok(message);
+            }
+        }
+    }
+
+    fn read_app_message(&mut self) -> Result<Value> {
+        let mut line = String::new();
+        let bytes = self
+            .stdout
+            .read_line(&mut line)
+            .context("failed to read codex app-server message")?;
+        if bytes == 0 {
+            anyhow::bail!("codex app-server closed while reading message");
+        }
+        Ok(serde_json::from_str(line.trim())?)
+    }
+}
+
+struct AppServerApprovalPrompt {
+    kind: &'static str,
+    title: String,
+    body: String,
+}
+
+fn app_server_approval_prompt(
+    method: &str,
+    params: Option<&Value>,
+) -> Option<AppServerApprovalPrompt> {
+    let params = params.unwrap_or(&Value::Null);
+    match method {
+        "item/commandExecution/requestApproval" => {
+            let command = params
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown command");
+            let cwd = params.get("cwd").and_then(Value::as_str).unwrap_or("");
+            let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
+            Some(AppServerApprovalPrompt {
+                kind: "command",
+                title: "Run command?".to_string(),
+                body: format_approval_body(command, cwd, reason),
+            })
+        }
+        "execCommandApproval" => {
+            let command = params
+                .get("command")
+                .and_then(Value::as_array)
+                .map(|parts| {
+                    parts
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .filter(|command| !command.is_empty())
+                .unwrap_or_else(|| "unknown command".to_string());
+            let cwd = params.get("cwd").and_then(Value::as_str).unwrap_or("");
+            let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
+            Some(AppServerApprovalPrompt {
+                kind: "command",
+                title: "Run command?".to_string(),
+                body: format_approval_body(&command, cwd, reason),
+            })
+        }
+        "item/fileChange/requestApproval" => {
+            let root = params
+                .get("grantRoot")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
+            Some(AppServerApprovalPrompt {
+                kind: "file_change",
+                title: "Allow file changes?".to_string(),
+                body: format_approval_body("file write access", root, reason),
+            })
+        }
+        "applyPatchApproval" => {
+            let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
+            let changes = params
+                .get("fileChanges")
+                .and_then(Value::as_object)
+                .map(|changes| changes.keys().cloned().collect::<Vec<_>>().join("\n"))
+                .unwrap_or_default();
+            Some(AppServerApprovalPrompt {
+                kind: "file_change",
+                title: "Apply patch?".to_string(),
+                body: format_approval_body("patch", &changes, reason),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn format_approval_body(action: &str, cwd: &str, reason: &str) -> String {
+    let mut body = format!("Action:\n{action}");
+    if !cwd.is_empty() {
+        body.push_str(&format!("\n\nTarget:\n{cwd}"));
+    }
+    if !reason.is_empty() {
+        body.push_str(&format!("\n\nReason:\n{reason}"));
+    }
+    body
 }
 
 fn method_not_found(id: Value, method: &str) -> Result<Value> {
@@ -250,156 +731,11 @@ fn codex_prompt(prompt: &str, meta: Option<&Value>) -> String {
 
     match context {
         Some(context) => format!(
-            "You are being invoked from Helix through ACP.\n\nDo not modify files or run write operations. If code changes are requested, return a git-apply compatible unified diff in your final answer. Helix will let the user inspect and explicitly apply that patch.\n\nHelix editor context JSON:\n```json\n{}\n```\n\nUser prompt:\n{}",
+            "You are being invoked from DoomHelix through ACP.\n\nDoomHelix editor context JSON:\n```json\n{}\n```\n\nUser prompt:\n{}",
             serde_json::to_string_pretty(context).unwrap_or_else(|_| context.to_string()),
             prompt
         ),
         None => prompt.to_string(),
-    }
-}
-
-fn run_codex_exec_stream(
-    cwd: Option<&str>,
-    prompt: &str,
-    session_id: &str,
-    output: &mut impl AgentOutput,
-) -> Result<()> {
-    let command = env::var("HELIX_CODEX_COMMAND").unwrap_or_else(|_| "codex".to_string());
-    let mut child = Command::new(command);
-    child
-        .arg("exec")
-        .arg("--color")
-        .arg("never")
-        .arg("--json")
-        .arg("--skip-git-repo-check")
-        .arg("--sandbox")
-        .arg("read-only")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    if let Some(cwd) = cwd {
-        child.arg("--cd").arg(cwd);
-    }
-
-    child.arg("-");
-
-    let mut child = child.spawn().context("failed to spawn codex exec")?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .context("codex exec stdin is unavailable")?;
-    stdin
-        .write_all(prompt.as_bytes())
-        .context("failed to write prompt to codex exec")?;
-    drop(stdin);
-
-    let stdout = child
-        .stdout
-        .take()
-        .context("codex exec stdout is unavailable")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("codex exec stderr is unavailable")?;
-    let stderr_reader = thread::spawn(move || {
-        let mut stderr = stderr;
-        let mut buffer = String::new();
-        stderr.read_to_string(&mut buffer).map(|_| buffer)
-    });
-
-    let mut saw_stdout = false;
-    let mut stdout = BufReader::new(stdout);
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let bytes = stdout
-            .read_line(&mut line)
-            .context("failed to read codex exec stdout")?;
-        if bytes == 0 {
-            break;
-        }
-
-        saw_stdout = true;
-        write_codex_json_event(output, session_id, &line)?;
-    }
-
-    let status = child.wait().context("failed to read codex exec output")?;
-    let stderr = stderr_reader
-        .join()
-        .unwrap_or_else(|_| Ok("failed to join codex stderr reader".to_string()))?
-        .trim()
-        .to_string();
-
-    if status.success() {
-        if !saw_stdout {
-            write_agent_message_chunk(output, session_id, "(codex exec completed without output)")?;
-        }
-        return Ok(());
-    }
-
-    let message = if stderr.is_empty() {
-        format!("codex exec exited with {status}")
-    } else {
-        format!("codex exec exited with {status}:\n{stderr}")
-    };
-    write_agent_message_chunk(output, session_id, &message)?;
-
-    Ok(())
-}
-
-fn write_codex_json_event(
-    output: &mut impl AgentOutput,
-    session_id: &str,
-    line: &str,
-) -> Result<()> {
-    let Ok(event) = serde_json::from_str::<Value>(line) else {
-        return write_agent_message_chunk(output, session_id, line);
-    };
-
-    match event.get("type").and_then(Value::as_str) {
-        Some("thread.started") => write_agent_status(output, session_id, "Session started"),
-        Some("turn.started") => write_agent_status(output, session_id, "Thinking..."),
-        Some("turn.completed") => write_agent_status(output, session_id, "Done"),
-        Some("item.completed") => write_codex_completed_item(output, session_id, &event),
-        Some(event_type) => {
-            write_agent_status(output, session_id, &format!("Codex event: {event_type}"))
-        }
-        None => Ok(()),
-    }
-}
-
-fn write_codex_completed_item(
-    output: &mut impl AgentOutput,
-    session_id: &str,
-    event: &Value,
-) -> Result<()> {
-    let Some(item) = event.get("item") else {
-        return Ok(());
-    };
-
-    match item.get("type").and_then(Value::as_str) {
-        Some("agent_message") => {
-            if let Some(text) = item.get("text").and_then(Value::as_str) {
-                write_agent_message_chunk(output, session_id, text)?;
-            }
-            Ok(())
-        }
-        Some("command_execution") => {
-            let command = item
-                .get("command")
-                .and_then(Value::as_str)
-                .unwrap_or("command");
-            write_agent_status(output, session_id, &format!("Ran `{command}`"))
-        }
-        Some("tool_call") => {
-            let name = item.get("name").and_then(Value::as_str).unwrap_or("tool");
-            write_agent_status(output, session_id, &format!("Used `{name}`"))
-        }
-        Some(item_type) => {
-            write_agent_status(output, session_id, &format!("Completed {item_type}"))
-        }
-        None => Ok(()),
     }
 }
 
@@ -439,14 +775,6 @@ fn write_agent_message_chunk(
             }
         }
     }))
-}
-
-fn new_session_id() -> String {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default();
-    format!("helix-codex-{millis}")
 }
 
 fn read_content_length_message(reader: &mut impl BufRead) -> Result<Option<Value>> {

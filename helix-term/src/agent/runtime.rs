@@ -4,6 +4,7 @@ use helix_view::DocumentId;
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use tokio::sync::oneshot;
 
 use super::{
     acp::{JsonRpcMessage, JsonRpcRequest},
@@ -195,6 +196,10 @@ where
 
     loop {
         let message = recv_running_message(&mut running).await?;
+        if let Some(response) = handle_agent_request(&message).await? {
+            running.process.send(&response).await?;
+            continue;
+        }
         let turn_done =
             matches!(&message, JsonRpcMessage::Response(response) if response.id == request_id);
         update_session_id(&mut running, &message);
@@ -215,6 +220,91 @@ where
             });
         }
     }
+}
+
+async fn handle_agent_request(message: &JsonRpcMessage) -> anyhow::Result<Option<Value>> {
+    let JsonRpcMessage::Request(request) = message else {
+        return Ok(None);
+    };
+
+    match request.method.as_str() {
+        "agent/approval" => {
+            let decision = prompt_agent_approval(request.params.clone()).await?;
+            Ok(Some(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "result": {
+                    "decision": decision
+                }
+            })))
+        }
+        method => Ok(Some(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request.id,
+            "error": {
+                "code": -32601,
+                "message": format!("unsupported agent request: {method}")
+            }
+        }))),
+    }
+}
+
+async fn prompt_agent_approval(params: Option<Value>) -> anyhow::Result<&'static str> {
+    let params = params.unwrap_or(Value::Null);
+    let title = params
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("Approve agent action?");
+    let body = params
+        .get("body")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let prompt = format!("{title} [y/N] ");
+    let (tx, rx) = oneshot::channel::<bool>();
+    crate::job::dispatch_blocking(move |editor, compositor| {
+        let mut tx = Some(tx);
+        let body = body.clone();
+        let mut prompt = crate::ui::Prompt::new(
+            prompt.into(),
+            None,
+            |_editor, _input| Vec::new(),
+            move |cx, input, event| {
+                use crate::ui::PromptEvent;
+                match event {
+                    PromptEvent::Validate => {
+                        let accepted =
+                            matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes");
+                        if let Some(tx) = tx.take() {
+                            let _ = tx.send(accepted);
+                        }
+                        if accepted {
+                            cx.editor.set_status("Agent action approved");
+                        } else {
+                            cx.editor.set_status("Agent action declined");
+                        }
+                    }
+                    PromptEvent::Abort => {
+                        if let Some(tx) = tx.take() {
+                            let _ = tx.send(false);
+                        }
+                        cx.editor.set_status("Agent action declined");
+                    }
+                    PromptEvent::Update => {}
+                }
+            },
+        );
+        prompt.doc_fn =
+            Box::new(move |_| (!body.is_empty()).then(|| std::borrow::Cow::Owned(body.clone())));
+        prompt.recalculate_completion(editor);
+        compositor.push(Box::new(prompt));
+    });
+
+    Ok(if rx.await.unwrap_or(false) {
+        "accept"
+    } else {
+        "decline"
+    })
 }
 
 pub async fn send_prompt(prompt: String, meta: Option<Value>) -> anyhow::Result<u64> {
