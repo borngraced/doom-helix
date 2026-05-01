@@ -5,7 +5,7 @@ use tokio::{
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
 };
 
-use super::config::AgentLaunchConfig;
+use super::{acp, config::AgentLaunchConfig, session};
 
 pub struct AgentProcess {
     child: Child,
@@ -45,6 +45,16 @@ impl AgentProcess {
         let frame = encode_content_length_message(message)?;
         self.stdin.write_all(&frame).await?;
         self.stdin.flush().await?;
+        Ok(())
+    }
+
+    pub async fn send_session_handshake(
+        &mut self,
+        editor: &helix_view::Editor,
+    ) -> anyhow::Result<()> {
+        self.send(&acp::initialize_request(1)?).await?;
+        self.send(&acp::new_session_request(2, session::new_session(editor))?)
+            .await?;
         Ok(())
     }
 
