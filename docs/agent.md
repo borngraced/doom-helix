@@ -86,6 +86,6 @@ This is not wired into Helix's loaded editor config yet. It is the shape the pro
 The next implementation steps are:
 
 1. Spawn an external ACP-compatible subprocess.
-2. Send `initialize` and `session/new` JSON-RPC messages over stdio.
+2. Send `initialize` and `session/new` JSON-RPC messages over stdio using `Content-Length` framing.
 3. Render responses in an agent buffer.
 4. Add explicit permission gates before any write, shell, or command-execution tool.
