@@ -143,7 +143,8 @@ c = ":agent chat"
 e = ":agent explain"
 f = ":agent fix"
 r = ":agent refactor"
-s = ":agent status"
+s = ":agent start"
+S = ":agent status"
 
 [keys.select.space.a]
 c = ":agent chat"
