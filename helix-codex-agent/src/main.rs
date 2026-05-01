@@ -185,6 +185,7 @@ fn run_codex_exec(cwd: Option<&str>, prompt: &str) -> Result<String> {
         .arg("exec")
         .arg("--color")
         .arg("never")
+        .arg("--skip-git-repo-check")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
