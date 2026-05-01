@@ -771,6 +771,11 @@ fn open_agent_patch(cx: &mut compositor::Context) -> anyhow::Result<()> {
         cx.editor.set_error("No agent patch proposal is available");
         return Ok(());
     };
+    if !is_unified_diff(&patch) {
+        cx.editor
+            .set_error("Latest agent response is not an applyable patch");
+        return Ok(());
+    }
 
     open_agent_scratch_editor(cx.editor, patch, "diff")
 }
@@ -780,6 +785,11 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
         cx.editor.set_error("No agent patch proposal is available");
         return;
     };
+    if !is_unified_diff(&patch) {
+        cx.editor
+            .set_error("Latest agent response is not an applyable patch");
+        return;
+    }
 
     cx.jobs.callback(async move {
         Ok(job::Callback::EditorCompositor(Box::new(
@@ -888,17 +898,36 @@ fn prompt_agent_turn(
         helix_event::status::report(status).await;
         let turn = crate::agent::runtime::send_prompt_turn(prompt, Some(meta)).await?;
         let contents = agent_turn_response_markdown(&turn)?;
-        if store_patch {
-            crate::agent::runtime::set_latest_patch(extract_agent_patch(&contents));
+        let patch_stored = if store_patch {
+            if let Some(patch) = extract_agent_patch(&contents) {
+                crate::agent::runtime::set_latest_patch(patch);
+                true
+            } else {
+                crate::agent::runtime::clear_latest_patch();
+                false
+            }
+        } else {
+            false
+        };
+        let status_suffix = if store_patch && !patch_stored {
+            "; no applicable patch found"
+        } else {
+            ""
+        };
+        let status = format!("Agent turn #{}{status_suffix}", turn.request_id);
+        let status = if status_suffix.is_empty() {
+            format!("{status} complete")
+        } else {
+            status
         }
-        let request_id = turn.request_id;
+        .to_string();
         Ok(job::Callback::Editor(Box::new(move |editor| {
             if let Err(err) =
                 replace_agent_pending_transcript_editor(editor, pending_range, contents)
             {
                 editor.set_error(err.to_string());
             } else {
-                editor.set_status(format!("Agent turn #{request_id} complete"));
+                editor.set_status(status);
             }
         })))
     });
@@ -1157,7 +1186,7 @@ fn agent_turn_response_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyh
     Ok(response.trim().to_string())
 }
 
-fn extract_agent_patch(response: &str) -> String {
+fn extract_agent_patch(response: &str) -> Option<String> {
     let mut in_fence = false;
     let mut fence_is_diff = false;
     let mut patch = String::new();
@@ -1167,7 +1196,7 @@ fn extract_agent_patch(response: &str) -> String {
         if let Some(info) = trimmed.strip_prefix("```") {
             if in_fence {
                 if fence_is_diff {
-                    return patch.trim().to_string();
+                    return normalize_agent_patch(&patch);
                 }
                 in_fence = false;
                 fence_is_diff = false;
@@ -1185,7 +1214,42 @@ fn extract_agent_patch(response: &str) -> String {
         }
     }
 
-    response.trim().to_string()
+    normalize_agent_patch(response)
+}
+
+fn normalize_agent_patch(response: &str) -> Option<String> {
+    let lines = response.lines().collect::<Vec<_>>();
+    let start = lines
+        .iter()
+        .position(|line| is_diff_start_line(line.trim_start()))?;
+    let patch = lines[start..].join("\n");
+    if is_unified_diff(&patch) {
+        Some(patch.trim().to_string())
+    } else {
+        None
+    }
+}
+
+fn is_diff_start_line(line: &str) -> bool {
+    line.starts_with("diff --git ") || line.starts_with("--- ")
+}
+
+fn is_unified_diff(patch: &str) -> bool {
+    let mut has_old_path = false;
+    let mut has_new_path = false;
+    let mut has_hunk = false;
+
+    for line in patch.lines().map(str::trim_start) {
+        if line.starts_with("--- ") {
+            has_old_path = true;
+        } else if line.starts_with("+++ ") {
+            has_new_path = true;
+        } else if line.starts_with("@@ ") {
+            has_hunk = true;
+        }
+    }
+
+    has_old_path && has_new_path && has_hunk
 }
 
 fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {

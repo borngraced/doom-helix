@@ -250,6 +250,12 @@ pub fn set_latest_patch(patch: String) {
         .expect("agent latest patch lock poisoned") = Some(patch);
 }
 
+pub fn clear_latest_patch() {
+    *AGENT_LATEST_PATCH
+        .lock()
+        .expect("agent latest patch lock poisoned") = None;
+}
+
 fn update_session_id(agent: &mut RunningAgent, message: &JsonRpcMessage) {
     let JsonRpcMessage::Response(response) = message else {
         return;
