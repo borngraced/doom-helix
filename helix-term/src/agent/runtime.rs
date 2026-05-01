@@ -174,6 +174,7 @@ where
     let mut session_response = None;
     while running.session_id.is_none() {
         let message = recv_running_message(&mut running).await?;
+        log_agent_message("startup", &message);
         update_session_id(&mut running, &message);
         update_busy_agent_session(running.session_id.clone());
         if let Some(message) = session_new_failure_message(&message) {
@@ -202,7 +203,9 @@ where
         running.process.send(&request).await?;
         loop {
             let message = recv_running_message(&mut running).await?;
+            log_agent_message("approval-mode", &message);
             if let Some(response) = handle_agent_request(&message).await? {
+                log_agent_response("approval-mode", &response);
                 running.process.send(&response).await?;
                 continue;
             }
@@ -229,7 +232,9 @@ where
 
     loop {
         let message = recv_running_message(&mut running).await?;
+        log_agent_message("prompt", &message);
         if let Some(response) = handle_agent_request(&message).await? {
+            log_agent_response("prompt", &response);
             running.process.send(&response).await?;
             continue;
         }
@@ -262,7 +267,19 @@ async fn handle_agent_request(message: &JsonRpcMessage) -> anyhow::Result<Option
 
     match request.method.as_str() {
         "session/request_permission" => {
+            log::info!(
+                "agent requested permission: id={}, title={:?}, kind={:?}, options={}",
+                request.id,
+                permission_title(request.params.as_ref()),
+                permission_kind(request.params.as_ref()),
+                permission_option_summary(request.params.as_ref())
+            );
             let option_id = prompt_acp_permission(request.params.clone()).await?;
+            log::info!(
+                "agent permission response: id={}, selected option '{}'",
+                request.id,
+                option_id
+            );
             Ok(Some(serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": request.id,
@@ -275,7 +292,21 @@ async fn handle_agent_request(message: &JsonRpcMessage) -> anyhow::Result<Option
             })))
         }
         "agent/approval" => {
+            log::info!(
+                "agent requested legacy approval: id={}, title={:?}",
+                request.id,
+                request
+                    .params
+                    .as_ref()
+                    .and_then(|params| params.get("title"))
+                    .and_then(Value::as_str)
+            );
             let decision = prompt_agent_approval(request.params.clone()).await?;
+            log::info!(
+                "agent legacy approval response: id={}, decision '{}'",
+                request.id,
+                decision
+            );
             Ok(Some(serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": request.id,
@@ -284,14 +315,26 @@ async fn handle_agent_request(message: &JsonRpcMessage) -> anyhow::Result<Option
                 }
             })))
         }
-        method => Ok(Some(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": request.id,
-            "error": {
-                "code": -32601,
-                "message": format!("unsupported agent request: {method}")
-            }
-        }))),
+        method => {
+            log::warn!(
+                "unsupported agent request: id={}, method={}, params={}",
+                request.id,
+                method,
+                request
+                    .params
+                    .as_ref()
+                    .map(Value::to_string)
+                    .unwrap_or_else(|| "null".to_string())
+            );
+            Ok(Some(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "error": {
+                    "code": -32601,
+                    "message": format!("unsupported agent request: {method}")
+                }
+            })))
+        }
     }
 }
 
@@ -331,6 +374,45 @@ fn acp_permission_choices(params: &Value) -> (String, String) {
         acp_permission_option(&options, false).unwrap_or_else(|| "deny".to_string());
 
     (allow_option, reject_option)
+}
+
+fn permission_title(params: Option<&Value>) -> Option<&str> {
+    params
+        .and_then(|params| params.get("toolCall").or_else(|| params.get("tool_call")))
+        .and_then(|tool_call| tool_call.get("title"))
+        .and_then(Value::as_str)
+}
+
+fn permission_kind(params: Option<&Value>) -> Option<&str> {
+    params
+        .and_then(|params| params.get("toolCall").or_else(|| params.get("tool_call")))
+        .and_then(|tool_call| tool_call.get("kind"))
+        .and_then(Value::as_str)
+}
+
+fn permission_option_summary(params: Option<&Value>) -> String {
+    let Some(options) = params
+        .and_then(|params| params.get("options"))
+        .and_then(Value::as_array)
+    else {
+        return "[]".to_string();
+    };
+
+    options
+        .iter()
+        .filter_map(|option| {
+            let id = option
+                .get("optionId")
+                .or_else(|| option.get("option_id"))
+                .and_then(Value::as_str)?;
+            let kind = option
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            Some(format!("{id}:{kind}"))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn acp_permission_option(options: &[Value], allow: bool) -> Option<String> {
@@ -804,6 +886,102 @@ fn session_new_failure_message(message: &JsonRpcMessage) -> Option<String> {
         Some(error) => format!("agent session/new failed: {}", error.message),
         None => "agent session/new response did not include a sessionId".to_string(),
     })
+}
+
+fn log_agent_message(phase: &str, message: &JsonRpcMessage) {
+    match message {
+        JsonRpcMessage::Response(response) => {
+            log::info!(
+                "agent {phase} response: id={}, result={}, error={:?}",
+                response.id,
+                response
+                    .result
+                    .as_ref()
+                    .map(response_result_summary)
+                    .unwrap_or_else(|| "none".to_string()),
+                response.error.as_ref().map(|error| error.message.as_str())
+            );
+        }
+        JsonRpcMessage::Request(request) => {
+            log::info!(
+                "agent {phase} request: id={}, method={}",
+                request.id,
+                request.method
+            );
+        }
+        JsonRpcMessage::Notification(notification) => {
+            log::info!(
+                "agent {phase} notification: method={}, update={:?}, tool={:?}, status={:?}",
+                notification.method,
+                notification_update_kind(notification.params.as_ref()),
+                notification_tool_kind(notification.params.as_ref()),
+                notification_tool_status(notification.params.as_ref())
+            );
+        }
+    }
+}
+
+fn log_agent_response(phase: &str, response: &Value) {
+    log::info!("agent {phase} client response: {response}");
+}
+
+fn response_result_summary(result: &Value) -> String {
+    let session_id = result
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .map(|session_id| format!("sessionId={session_id}"));
+    let config_mode = result
+        .get("configOptions")
+        .and_then(Value::as_array)
+        .and_then(|options| {
+            options.iter().find_map(|option| {
+                let category = option.get("category").and_then(Value::as_str);
+                let id = option.get("id").and_then(Value::as_str);
+                (category == Some("mode") || id == Some("mode"))
+                    .then(|| option.get("currentValue").and_then(Value::as_str))
+                    .flatten()
+            })
+        })
+        .map(|mode| format!("configMode={mode}"));
+    let session_mode = result
+        .get("modes")
+        .and_then(|modes| modes.get("currentModeId"))
+        .and_then(Value::as_str)
+        .map(|mode| format!("mode={mode}"));
+
+    let summary = [session_id, config_mode, session_mode]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if summary.is_empty() {
+        "ok".to_string()
+    } else {
+        summary
+    }
+}
+
+fn notification_update_kind(params: Option<&Value>) -> Option<&str> {
+    params?
+        .get("update")?
+        .get("sessionUpdate")
+        .and_then(Value::as_str)
+}
+
+fn notification_tool_kind(params: Option<&Value>) -> Option<&str> {
+    params?
+        .get("update")?
+        .get("toolCall")?
+        .get("kind")
+        .and_then(Value::as_str)
+}
+
+fn notification_tool_status(params: Option<&Value>) -> Option<&str> {
+    params?
+        .get("update")?
+        .get("toolCall")?
+        .get("status")
+        .and_then(Value::as_str)
 }
 
 fn approval_mode_request(
