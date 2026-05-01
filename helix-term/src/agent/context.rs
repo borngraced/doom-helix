@@ -63,6 +63,7 @@ pub struct VisibleRangeSnapshot {
 pub struct SelectionSnapshot {
     pub index: usize,
     pub primary: bool,
+    pub empty: bool,
     pub anchor: usize,
     pub head: usize,
     pub start: PositionSnapshot,
@@ -147,15 +148,20 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         .map(|(index, range)| {
             let start = coords_at_pos(text, range.from());
             let end = coords_at_pos(text, range.to());
-            let selected_text = text
-                .slice(range.from()..range.to())
-                .chars()
-                .take(MAX_SELECTION_TEXT_CHARS)
-                .collect::<String>();
+            let empty = range.is_empty();
+            let selected_text = if empty {
+                String::new()
+            } else {
+                text.slice(range.from()..range.to())
+                    .chars()
+                    .take(MAX_SELECTION_TEXT_CHARS)
+                    .collect::<String>()
+            };
 
             SelectionSnapshot {
                 index,
                 primary: index == selection.primary_index(),
+                empty,
                 anchor: range.anchor,
                 head: range.head,
                 start: PositionSnapshot {
@@ -259,11 +265,9 @@ pub fn prompt_with_primary_selection(editor: &Editor, prompt: &str) -> String {
 }
 
 pub fn prompt_with_primary_selection_snapshot(snapshot: &EditorSnapshot, prompt: &str) -> String {
-    let Some(selection) = snapshot
-        .selections
-        .iter()
-        .find(|selection| selection.primary && !selection.text.trim().is_empty())
-    else {
+    let Some(selection) = snapshot.selections.iter().find(|selection| {
+        selection.primary && !selection.empty && !selection.text.trim().is_empty()
+    }) else {
         return prompt.to_string();
     };
 
@@ -365,5 +369,79 @@ fn file_change_snapshot(change: FileChange, root: &Path) -> FileChangeSnapshot {
             path: display_path(&to_path),
             from_path: Some(display_path(&from_path)),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snapshot_with_selection(selection: SelectionSnapshot) -> EditorSnapshot {
+        EditorSnapshot {
+            workspace_root: "/repo".to_string(),
+            cwd: "/repo".to_string(),
+            theme: "default".to_string(),
+            mode: "normal".to_string(),
+            active_file: ActiveFileSnapshot {
+                id: "1".to_string(),
+                display_name: "main.go".to_string(),
+                path: Some("/repo/main.go".to_string()),
+                language: Some("go".to_string()),
+                language_id: Some("go".to_string()),
+                modified: false,
+                line_ending: "LF".to_string(),
+                encoding: "UTF-8".to_string(),
+            },
+            cursor: CursorSnapshot {
+                line: 0,
+                column: 0,
+                char: 0,
+            },
+            visible_ranges: Vec::new(),
+            selections: vec![selection],
+            open_buffers: Vec::new(),
+            diagnostics: Vec::new(),
+            lsp_servers: Vec::new(),
+            git: GitSnapshot {
+                branch: None,
+                changed_files: Vec::new(),
+                changed_files_truncated: false,
+            },
+            recent_commands: Vec::new(),
+        }
+    }
+
+    fn selection_snapshot(empty: bool, text: &str) -> SelectionSnapshot {
+        SelectionSnapshot {
+            index: 0,
+            primary: true,
+            empty,
+            anchor: 0,
+            head: if empty { 0 } else { text.chars().count() },
+            start: PositionSnapshot { line: 0, column: 0 },
+            end: PositionSnapshot {
+                line: 0,
+                column: text.chars().count(),
+            },
+            text: text.to_string(),
+            truncated: false,
+        }
+    }
+
+    #[test]
+    fn prompt_ignores_cursor_only_selection() {
+        let snapshot = snapshot_with_selection(selection_snapshot(true, ""));
+        assert_eq!(
+            prompt_with_primary_selection_snapshot(&snapshot, "Explain this."),
+            "Explain this."
+        );
+    }
+
+    #[test]
+    fn prompt_includes_extended_selection() {
+        let snapshot = snapshot_with_selection(selection_snapshot(false, "fmt.Println(x)"));
+        let prompt = prompt_with_primary_selection_snapshot(&snapshot, "Explain this.");
+        assert!(prompt.contains("Selected text from /repo/main.go:1:1-1:15"));
+        assert!(prompt.contains("```go\nfmt.Println(x)\n```"));
     }
 }
