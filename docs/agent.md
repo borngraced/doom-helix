@@ -326,6 +326,8 @@ DOOMHELIX_AGENT=none curl -fsSL https://raw.githubusercontent.com/borngraced/doo
 
 Codex installs `codex-acp`. Claude installs
 `@zed-industries/claude-code-acp` through npm and expects
-`claude-code-acp` on `PATH`. Use `DOOMHELIX_AGENT=none` when you want to wire a
-custom ACP-compatible agent manually. The installer writes a starter config
-only when `~/.config/doomhelix/config.toml` does not already exist.
+`claude-code-acp` on `PATH`. The npm install uses DoomHelix's install prefix,
+so the default install writes to `~/.local` instead of `/usr/local`. Use
+`DOOMHELIX_AGENT=none` when you want to wire a custom ACP-compatible agent
+manually. The installer writes a starter config only when
+`~/.config/doomhelix/config.toml` does not already exist.

@@ -127,7 +127,8 @@ DoomHelix talks to agents over ACP, the Agent Client Protocol used by Zed's
 agent integration. Codex uses Zed's `codex-acp` adapter, which bridges
 DoomHelix's ACP client to Codex's long-lived app-server backend. Claude uses
 Zed's `@zed-industries/claude-code-acp` adapter, installed as
-`claude-code-acp`.
+`claude-code-acp`. The installer installs npm-based adapters under DoomHelix's
+install prefix, so the default install stays inside `~/.local`.
 
 ## Upstream
 

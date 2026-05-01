@@ -267,6 +267,11 @@ install_claude_acp() {
     return
   fi
 
+  if [ -x "$bin_dir/$claude_acp_command" ]; then
+    echo "$claude_acp_command already installed at $bin_dir/$claude_acp_command; leaving it unchanged."
+    return
+  fi
+
   if command -v "$claude_acp_command" >/dev/null 2>&1; then
     echo "$claude_acp_command already available on PATH; leaving it unchanged."
     return
@@ -275,12 +280,17 @@ install_claude_acp() {
   if ! command -v npm >/dev/null 2>&1; then
     echo "warning: npm was not found; skipping Claude ACP adapter install." >&2
     echo "Install Node.js/npm, then run:" >&2
-    echo "  npm install -g ${claude_acp_package}" >&2
+    echo "  npm install -g --prefix \"$prefix\" ${claude_acp_package}" >&2
     return
   fi
 
-  echo "Installing Claude ACP adapter (${claude_acp_package})..."
-  npm install -g "$claude_acp_package"
+  echo "Installing Claude ACP adapter (${claude_acp_package}) under $prefix..."
+  npm install -g --prefix "$prefix" "$claude_acp_package"
+
+  if [ "$bin_dir" != "$prefix/bin" ] && [ ! -e "$bin_dir/$claude_acp_command" ] && [ -x "$prefix/bin/$claude_acp_command" ]; then
+    mkdir -p "$bin_dir"
+    ln -s "$prefix/bin/$claude_acp_command" "$bin_dir/$claude_acp_command"
+  fi
 }
 
 write_default_config() {
