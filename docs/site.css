@@ -109,9 +109,9 @@ pre,
 
 .hero {
   position: relative;
-  min-height: 860px;
+  min-height: 760px;
   display: grid;
-  grid-template-columns: minmax(320px, 0.8fr) minmax(440px, 1.2fr);
+  grid-template-columns: minmax(320px, 0.92fr) minmax(420px, 1.08fr);
   gap: 40px;
   align-items: center;
   max-width: 1240px;
@@ -194,6 +194,8 @@ h3 {
 }
 
 .editor-shell {
+  justify-self: end;
+  width: min(100%, 760px);
   overflow: hidden;
   border: 1px solid var(--line);
   background: var(--panel);
@@ -209,7 +211,7 @@ h3 {
   min-height: 40px;
   padding: 0 12px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .editor-tabs,
@@ -251,7 +253,7 @@ h3 {
 .editor-grid {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr) minmax(260px, 36%);
-  min-height: 500px;
+  min-height: 420px;
 }
 
 .gutter {
@@ -262,7 +264,7 @@ h3 {
   border-right: 1px solid var(--line);
   color: var(--soft);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: 13px;
+  font-size: 12px;
   text-align: right;
 }
 
@@ -275,8 +277,8 @@ h3 {
   padding: 24px;
   overflow: hidden;
   color: var(--text);
-  font-size: clamp(12px, 1.3vw, 16px);
-  line-height: 1.75;
+  font-size: clamp(11px, 1.05vw, 14px);
+  line-height: 1.65;
 }
 
 .kw {
@@ -295,7 +297,7 @@ h3 {
   border-left: 1px solid var(--line);
   padding: 22px;
   background: #151518;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.58;
 }
 
@@ -305,7 +307,7 @@ h3 {
   padding: 5px 8px;
   border: 1px solid rgba(125, 240, 166, 0.35);
   color: var(--green);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .speaker {
@@ -319,7 +321,7 @@ h3 {
   padding: 10px;
   border: 1px solid rgba(229, 200, 144, 0.42);
   color: var(--gold);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .commandline {
