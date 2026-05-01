@@ -32,7 +32,8 @@ attached automatically.
 - Apply failure diagnostics shown in editor buffers.
 - One managed agent panel to avoid message routing confusion.
 - Configurable panel position: `left`, `right`, `top`, or `bottom`.
-- Configurable and keyboard-resizable panel size.
+- Configurable and keyboard-resizable panel size with `<space>a +` and
+  `<space>a -`.
 - Markdown transcript with selectable/copyable text and code fences.
 - `gd` on transcript file links jumps back into the referenced source file.
 - Agent transcript restore within the running editor session.

@@ -301,6 +301,10 @@ write_default_config() {
   if [ -e "$config_file" ]; then
     echo "DoomHelix config already exists; leaving it unchanged:"
     echo "  $config_file"
+    if [ "$selected_agent" != none ]; then
+      echo "Selected agent backend '$selected_agent' was installed, but your existing config was not changed."
+      echo "Update [editor.agent].default-agent and [editor.agent.servers.*] if you want to switch backends."
+    fi
     return
   fi
 
