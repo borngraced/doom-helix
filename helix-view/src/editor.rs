@@ -466,15 +466,27 @@ pub enum AgentPanelPosition {
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
 pub struct AgentServerConfig {
+    pub transport: AgentTransport,
     pub command: String,
     pub args: Vec<String>,
+    pub url: String,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentTransport {
+    #[default]
+    Stdio,
+    Websocket,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentLaunchConfig {
     pub name: String,
+    pub transport: AgentTransport,
     pub command: String,
     pub args: Vec<String>,
+    pub url: String,
 }
 
 impl AgentConfig {
@@ -487,14 +499,22 @@ impl AgentConfig {
             anyhow::anyhow!("agent server '{}' is not configured", self.default_agent)
         })?;
 
-        if server.command.trim().is_empty() {
-            anyhow::bail!("agent server '{}' has an empty command", self.default_agent);
+        match server.transport {
+            AgentTransport::Stdio if server.command.trim().is_empty() => {
+                anyhow::bail!("agent server '{}' has an empty command", self.default_agent);
+            }
+            AgentTransport::Websocket if server.url.trim().is_empty() => {
+                anyhow::bail!("agent server '{}' has an empty url", self.default_agent);
+            }
+            _ => {}
         }
 
         Ok(AgentLaunchConfig {
             name: self.default_agent.clone(),
+            transport: server.transport,
             command: server.command.clone(),
             args: server.args.clone(),
+            url: server.url.clone(),
         })
     }
 }
@@ -515,8 +535,10 @@ impl Default for AgentConfig {
             servers: BTreeMap::from([(
                 "codex".to_string(),
                 AgentServerConfig {
+                    transport: AgentTransport::Stdio,
                     command: "codex".to_string(),
                     args: vec!["acp".to_string()],
+                    url: String::new(),
                 },
             )]),
         }
@@ -2625,6 +2647,7 @@ mod agent_config_tests {
         assert_eq!(config.default_agent, "local");
         assert_eq!(config.panel_position, AgentPanelPosition::Bottom);
         assert_eq!(config.panel_size, 40);
+        assert_eq!(config.servers["local"].transport, AgentTransport::Stdio);
         assert_eq!(config.servers["local"].command, "agent");
         assert_eq!(config.servers["local"].args, ["--acp"]);
     }
@@ -2665,8 +2688,29 @@ mod agent_config_tests {
 
         let launch = config.launch_config().unwrap();
         assert_eq!(launch.name, "local");
+        assert_eq!(launch.transport, AgentTransport::Stdio);
         assert_eq!(launch.command, "agent");
         assert_eq!(launch.args, ["--acp"]);
+    }
+
+    #[test]
+    fn resolves_websocket_launch_config() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            enable = true
+            default-agent = "remote"
+
+            [servers.remote]
+            transport = "websocket"
+            url = "ws://127.0.0.1:9000/acp"
+            "#,
+        )
+        .unwrap();
+
+        let launch = config.launch_config().unwrap();
+        assert_eq!(launch.name, "remote");
+        assert_eq!(launch.transport, AgentTransport::Websocket);
+        assert_eq!(launch.url, "ws://127.0.0.1:9000/acp");
     }
 
     #[test]
@@ -2694,6 +2738,22 @@ mod agent_config_tests {
 
             [servers.local]
             command = "agent"
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.launch_config().is_err());
+    }
+
+    #[test]
+    fn rejects_websocket_agent_without_url() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            enable = true
+            default-agent = "remote"
+
+            [servers.remote]
+            transport = "websocket"
             "#,
         )
         .unwrap();

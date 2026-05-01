@@ -4,21 +4,104 @@ use std::{process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
-    time::timeout,
+    time::{sleep, timeout, Instant},
 };
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use super::{acp, session};
-use helix_view::editor::AgentLaunchConfig;
+use futures_util::{SinkExt, StreamExt};
+use helix_view::editor::{AgentLaunchConfig, AgentTransport};
 
 pub struct AgentProcess {
+    inner: AgentConnection,
+}
+
+enum AgentConnection {
+    Stdio(StdioAgentProcess),
+    WebSocket(WebSocketAgentProcess),
+}
+
+struct StdioAgentProcess {
     child: Child,
     stdin: BufWriter<ChildStdin>,
     stdout: BufReader<ChildStdout>,
     stderr: Option<BufReader<ChildStderr>>,
 }
 
+struct WebSocketAgentProcess {
+    stream: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    child: Option<Child>,
+}
+
 impl AgentProcess {
     pub async fn spawn(config: &AgentLaunchConfig) -> anyhow::Result<Self> {
+        match config.transport {
+            AgentTransport::Stdio => Ok(Self {
+                inner: AgentConnection::Stdio(StdioAgentProcess::spawn(config).await?),
+            }),
+            AgentTransport::Websocket => Ok(Self {
+                inner: AgentConnection::WebSocket(WebSocketAgentProcess::connect(config).await?),
+            }),
+        }
+    }
+
+    pub async fn spawn_and_handshake(
+        config: &AgentLaunchConfig,
+        editor: &helix_view::Editor,
+    ) -> anyhow::Result<Self> {
+        let mut process = Self::spawn(config).await?;
+        process.send_session_handshake(editor).await?;
+        Ok(process)
+    }
+
+    pub async fn send<T: Serialize>(&mut self, message: &T) -> anyhow::Result<()> {
+        match &mut self.inner {
+            AgentConnection::Stdio(process) => process.send(message).await,
+            AgentConnection::WebSocket(process) => process.send(message).await,
+        }
+    }
+
+    pub async fn send_session_handshake(
+        &mut self,
+        editor: &helix_view::Editor,
+    ) -> anyhow::Result<()> {
+        self.send(&acp::initialize_request(1)?).await?;
+        self.send(&acp::new_session_request(2, session::new_session(editor))?)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn recv<T: DeserializeOwned>(&mut self) -> anyhow::Result<T> {
+        match &mut self.inner {
+            AgentConnection::Stdio(process) => process.recv().await,
+            AgentConnection::WebSocket(process) => process.recv().await,
+        }
+    }
+
+    pub fn try_wait(&mut self) -> anyhow::Result<Option<std::process::ExitStatus>> {
+        match &mut self.inner {
+            AgentConnection::Stdio(process) => process.try_wait(),
+            AgentConnection::WebSocket(_) => Ok(None),
+        }
+    }
+
+    pub async fn stderr_snapshot(&mut self) -> anyhow::Result<Option<String>> {
+        match &mut self.inner {
+            AgentConnection::Stdio(process) => process.stderr_snapshot().await,
+            AgentConnection::WebSocket(_) => Ok(None),
+        }
+    }
+
+    pub async fn kill(&mut self) -> anyhow::Result<()> {
+        match &mut self.inner {
+            AgentConnection::Stdio(process) => process.kill().await,
+            AgentConnection::WebSocket(process) => process.close().await,
+        }
+    }
+}
+
+impl StdioAgentProcess {
+    async fn spawn(config: &AgentLaunchConfig) -> anyhow::Result<Self> {
         let mut child = Command::new(&config.command)
             .args(&config.args)
             .stdin(Stdio::piped())
@@ -44,41 +127,22 @@ impl AgentProcess {
         })
     }
 
-    pub async fn spawn_and_handshake(
-        config: &AgentLaunchConfig,
-        editor: &helix_view::Editor,
-    ) -> anyhow::Result<Self> {
-        let mut process = Self::spawn(config).await?;
-        process.send_session_handshake(editor).await?;
-        Ok(process)
-    }
-
-    pub async fn send<T: Serialize>(&mut self, message: &T) -> anyhow::Result<()> {
+    async fn send<T: Serialize>(&mut self, message: &T) -> anyhow::Result<()> {
         let frame = encode_content_length_message(message)?;
         self.stdin.write_all(&frame).await?;
         self.stdin.flush().await?;
         Ok(())
     }
 
-    pub async fn send_session_handshake(
-        &mut self,
-        editor: &helix_view::Editor,
-    ) -> anyhow::Result<()> {
-        self.send(&acp::initialize_request(1)?).await?;
-        self.send(&acp::new_session_request(2, session::new_session(editor))?)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn recv<T: DeserializeOwned>(&mut self) -> anyhow::Result<T> {
+    async fn recv<T: DeserializeOwned>(&mut self) -> anyhow::Result<T> {
         read_content_length_message(&mut self.stdout).await
     }
 
-    pub fn try_wait(&mut self) -> anyhow::Result<Option<std::process::ExitStatus>> {
+    fn try_wait(&mut self) -> anyhow::Result<Option<std::process::ExitStatus>> {
         Ok(self.child.try_wait()?)
     }
 
-    pub async fn stderr_snapshot(&mut self) -> anyhow::Result<Option<String>> {
+    async fn stderr_snapshot(&mut self) -> anyhow::Result<Option<String>> {
         let Some(stderr) = self.stderr.as_mut() else {
             return Ok(None);
         };
@@ -99,20 +163,78 @@ impl AgentProcess {
         }
     }
 
-    pub fn stdout(&mut self) -> &mut BufReader<ChildStdout> {
-        &mut self.stdout
-    }
-
-    pub fn stderr(&mut self) -> Option<&mut BufReader<ChildStderr>> {
-        self.stderr.as_mut()
-    }
-
-    pub async fn wait(&mut self) -> anyhow::Result<std::process::ExitStatus> {
-        Ok(self.child.wait().await?)
-    }
-
-    pub async fn kill(&mut self) -> anyhow::Result<()> {
+    async fn kill(&mut self) -> anyhow::Result<()> {
         self.child.kill().await?;
+        Ok(())
+    }
+}
+
+impl WebSocketAgentProcess {
+    async fn connect(config: &AgentLaunchConfig) -> anyhow::Result<Self> {
+        let child = if config.command.trim().is_empty() {
+            None
+        } else {
+            Some(
+                Command::new(&config.command)
+                    .args(&config.args)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()?,
+            )
+        };
+
+        let retry_until = child
+            .is_some()
+            .then(|| Instant::now() + Duration::from_secs(2));
+
+        loop {
+            match connect_async(config.url.as_str()).await {
+                Ok((stream, _)) => return Ok(Self { stream, child }),
+                Err(err) if retry_until.is_some_and(|deadline| Instant::now() < deadline) => {
+                    sleep(Duration::from_millis(50)).await;
+                    let _ = err;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
+
+    async fn send<T: Serialize>(&mut self, message: &T) -> anyhow::Result<()> {
+        let body = serde_json::to_string(message)?;
+        self.stream.send(Message::Text(body.into())).await?;
+        Ok(())
+    }
+
+    async fn recv<T: DeserializeOwned>(&mut self) -> anyhow::Result<T> {
+        loop {
+            let Some(message) = self.stream.next().await else {
+                anyhow::bail!("agent websocket closed while reading message");
+            };
+            match message? {
+                Message::Text(text) => return Ok(serde_json::from_str(&text)?),
+                Message::Binary(bytes) => return Ok(serde_json::from_slice(&bytes)?),
+                Message::Close(frame) => {
+                    let reason = frame
+                        .as_ref()
+                        .map(|frame| frame.reason.to_string())
+                        .filter(|reason| !reason.is_empty())
+                        .unwrap_or_else(|| "no close reason".to_string());
+                    anyhow::bail!("agent websocket closed: {reason}");
+                }
+                Message::Ping(bytes) => {
+                    self.stream.send(Message::Pong(bytes)).await?;
+                }
+                Message::Pong(_) | Message::Frame(_) => {}
+            }
+        }
+    }
+
+    async fn close(&mut self) -> anyhow::Result<()> {
+        self.stream.close(None).await?;
+        if let Some(child) = &mut self.child {
+            child.kill().await?;
+        }
         Ok(())
     }
 }

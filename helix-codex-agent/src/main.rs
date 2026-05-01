@@ -3,88 +3,150 @@ use serde_json::{json, Value};
 use std::{
     env,
     io::{self, BufRead, BufReader, Read, Write},
+    net::{TcpListener, TcpStream},
     process::{Command, Stdio},
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tungstenite::{accept, Message, WebSocket};
 
 const ACP_PROTOCOL_VERSION: u64 = 1;
 
 fn main() -> Result<()> {
+    let mut args = env::args().skip(1);
+    if args.next().as_deref() == Some("--websocket") {
+        let addr = args.next().unwrap_or_else(|| "127.0.0.1:9000".to_string());
+        return run_websocket_server(&addr);
+    }
+
+    run_stdio()
+}
+
+fn run_stdio() -> Result<()> {
     let stdin = io::stdin();
     let mut input = BufReader::new(stdin.lock());
-    let mut output = io::stdout().lock();
+    let mut stdout = io::stdout().lock();
     let mut state = AgentState::default();
 
     while let Some(message) = read_content_length_message(&mut input)? {
-        let Some(method) = message.get("method").and_then(Value::as_str) else {
-            continue;
+        let mut output = ContentLengthOutput {
+            writer: &mut stdout,
+        };
+        handle_agent_message(message, &mut state, &mut output)?;
+    }
+
+    Ok(())
+}
+
+fn run_websocket_server(addr: &str) -> Result<()> {
+    let listener = TcpListener::bind(addr).with_context(|| format!("failed to bind {addr}"))?;
+    eprintln!("helix-codex-agent websocket listening on ws://{addr}/acp");
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                if let Err(err) = handle_websocket_client(stream) {
+                    eprintln!("helix-codex-agent websocket client error: {err:#}");
+                }
+            }
+            Err(err) => eprintln!("helix-codex-agent websocket accept error: {err}"),
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_websocket_client(stream: TcpStream) -> Result<()> {
+    let mut websocket = accept(stream).context("failed to accept websocket connection")?;
+    let mut state = AgentState::default();
+
+    loop {
+        let message = match websocket
+            .read()
+            .context("failed to read websocket message")?
+        {
+            Message::Text(text) => serde_json::from_str(&text)?,
+            Message::Binary(bytes) => serde_json::from_slice(&bytes)?,
+            Message::Ping(bytes) => {
+                websocket
+                    .send(Message::Pong(bytes))
+                    .context("failed to write websocket pong")?;
+                continue;
+            }
+            Message::Pong(_) | Message::Frame(_) => continue,
+            Message::Close(_) => break,
         };
 
-        let id = message.get("id").cloned();
-        let params = message.get("params").cloned().unwrap_or(Value::Null);
-        match (id, method) {
-            (Some(id), "initialize") => {
-                let protocol_version = params
-                    .get("protocolVersion")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(ACP_PROTOCOL_VERSION);
-                write_message(&mut output, &initialize_response(id, protocol_version)?)?;
-            }
-            (Some(id), "session/new") => {
-                state.cwd = params
-                    .get("cwd")
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned)
-                    .or_else(|| env::current_dir().ok().map(|cwd| cwd.display().to_string()));
-                state.session_id = Some(new_session_id());
-                write_message(
-                    &mut output,
-                    &json!({
-                        "jsonrpc": "2.0",
-                        "id": id,
-                        "result": {
-                            "sessionId": state.session_id,
-                            "_meta": {
-                                "helixCodexAgent": {
-                                    "backend": "codex exec"
-                                }
-                            }
-                        }
-                    }),
-                )?;
-            }
-            (Some(id), "session/prompt") => {
-                let session_id = params
-                    .get("sessionId")
-                    .and_then(Value::as_str)
-                    .unwrap_or("helix-codex-session")
-                    .to_string();
-                let prompt = prompt_text(&params);
-                let codex_prompt = codex_prompt(&prompt, params.get("_meta"));
-                run_codex_exec_stream(
-                    state.cwd.as_deref(),
-                    &codex_prompt,
-                    &session_id,
-                    &mut output,
-                )?;
-                write_message(
-                    &mut output,
-                    &json!({
-                        "jsonrpc": "2.0",
-                        "id": id,
-                        "result": {
-                            "stopReason": "end_turn"
-                        }
-                    }),
-                )?;
-            }
-            (Some(id), method) => {
-                write_message(&mut output, &method_not_found(id, method)?)?;
-            }
-            (None, "session/cancel") => {}
-            (None, _) => {}
+        let mut output = WebSocketOutput {
+            websocket: &mut websocket,
+        };
+        handle_agent_message(message, &mut state, &mut output)?;
+    }
+
+    Ok(())
+}
+
+fn handle_agent_message(
+    message: Value,
+    state: &mut AgentState,
+    output: &mut impl AgentOutput,
+) -> Result<()> {
+    let Some(method) = message.get("method").and_then(Value::as_str) else {
+        return Ok(());
+    };
+
+    let id = message.get("id").cloned();
+    let params = message.get("params").cloned().unwrap_or(Value::Null);
+    match (id, method) {
+        (Some(id), "initialize") => {
+            let protocol_version = params
+                .get("protocolVersion")
+                .and_then(Value::as_u64)
+                .unwrap_or(ACP_PROTOCOL_VERSION);
+            output.write_message(&initialize_response(id, protocol_version)?)?;
         }
+        (Some(id), "session/new") => {
+            state.cwd = params
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+                .or_else(|| env::current_dir().ok().map(|cwd| cwd.display().to_string()));
+            state.session_id = Some(new_session_id());
+            output.write_message(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "sessionId": state.session_id,
+                    "_meta": {
+                        "helixCodexAgent": {
+                            "backend": "codex exec"
+                        }
+                    }
+                }
+            }))?;
+        }
+        (Some(id), "session/prompt") => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .unwrap_or("helix-codex-session")
+                .to_string();
+            let prompt = prompt_text(&params);
+            let codex_prompt = codex_prompt(&prompt, params.get("_meta"));
+            run_codex_exec_stream(state.cwd.as_deref(), &codex_prompt, &session_id, output)?;
+            output.write_message(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "stopReason": "end_turn"
+                }
+            }))?;
+        }
+        (Some(id), method) => {
+            output.write_message(&method_not_found(id, method)?)?;
+        }
+        (None, "session/cancel") => {}
+        (None, _) => {}
     }
 
     Ok(())
@@ -94,6 +156,34 @@ fn main() -> Result<()> {
 struct AgentState {
     session_id: Option<String>,
     cwd: Option<String>,
+}
+
+trait AgentOutput {
+    fn write_message(&mut self, message: &Value) -> Result<()>;
+}
+
+struct ContentLengthOutput<'a, W: Write> {
+    writer: &'a mut W,
+}
+
+impl<W: Write> AgentOutput for ContentLengthOutput<'_, W> {
+    fn write_message(&mut self, message: &Value) -> Result<()> {
+        write_content_length_message(self.writer, message)
+    }
+}
+
+struct WebSocketOutput<'a> {
+    websocket: &'a mut WebSocket<TcpStream>,
+}
+
+impl AgentOutput for WebSocketOutput<'_> {
+    fn write_message(&mut self, message: &Value) -> Result<()> {
+        let body = serde_json::to_string(message)?;
+        self.websocket
+            .send(Message::Text(body.into()))
+            .context("failed to write websocket message")?;
+        Ok(())
+    }
 }
 
 fn initialize_response(id: Value, protocol_version: u64) -> Result<Value> {
@@ -170,7 +260,7 @@ fn run_codex_exec_stream(
     cwd: Option<&str>,
     prompt: &str,
     session_id: &str,
-    output: &mut impl Write,
+    output: &mut impl AgentOutput,
 ) -> Result<()> {
     let command = env::var("HELIX_CODEX_COMMAND").unwrap_or_else(|_| "codex".to_string());
     let mut child = Command::new(command);
@@ -255,24 +345,25 @@ fn run_codex_exec_stream(
     Ok(())
 }
 
-fn write_agent_message_chunk(writer: &mut impl Write, session_id: &str, text: &str) -> Result<()> {
-    write_message(
-        writer,
-        &json!({
-            "jsonrpc": "2.0",
-            "method": "session/update",
-            "params": {
-                "sessionId": session_id,
-                "update": {
-                    "sessionUpdate": "agent_message_chunk",
-                    "content": {
-                        "type": "text",
-                        "text": text
-                    }
+fn write_agent_message_chunk(
+    output: &mut impl AgentOutput,
+    session_id: &str,
+    text: &str,
+) -> Result<()> {
+    output.write_message(&json!({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": session_id,
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {
+                    "type": "text",
+                    "text": text
                 }
             }
-        }),
-    )
+        }
+    }))
 }
 
 fn new_session_id() -> String {
@@ -310,7 +401,7 @@ fn read_content_length_message(reader: &mut impl BufRead) -> Result<Option<Value
     Ok(Some(serde_json::from_slice(&content)?))
 }
 
-fn write_message(writer: &mut impl Write, message: &Value) -> Result<()> {
+fn write_content_length_message(writer: &mut impl Write, message: &Value) -> Result<()> {
     let body = serde_json::to_string(message)?;
     write!(writer, "Content-Length: {}\r\n\r\n{}", body.len(), body)?;
     writer.flush()?;
