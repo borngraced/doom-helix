@@ -219,25 +219,24 @@ if [ "$installed_prebuilt" = 0 ]; then
 fi
 
 install_codex_acp
-cat >"$bin_dir/dhx" <<EOF
-#!/bin/sh
-HELIX_RUNTIME=${runtime_dir} exec ${bin_dir}/dhx-bin "\$@"
-EOF
+{
+  printf '%s\n' '#!/bin/sh'
+  printf 'HELIX_RUNTIME=%s exec %s/dhx-bin "$@"\n' "$runtime_dir" "$bin_dir"
+} >"$bin_dir/dhx"
 chmod 755 "$bin_dir/dhx"
 
-cat <<EOF
-DoomHelix installed.
-
-Binary:
-  $bin_dir/dhx
-  $bin_dir/dhx-bin
-
-Codex ACP adapter:
-  $bin_dir/codex-acp
-
-Runtime:
-  $runtime_dir
-
-Make sure '$bin_dir' is on PATH, then run:
-  dhx
-EOF
+printf '%s\n' \
+  'DoomHelix installed.' \
+  '' \
+  'Binary:' \
+  "  $bin_dir/dhx" \
+  "  $bin_dir/dhx-bin" \
+  '' \
+  'Codex ACP adapter:' \
+  "  $bin_dir/codex-acp" \
+  '' \
+  'Runtime:' \
+  "  $runtime_dir" \
+  '' \
+  "Make sure '$bin_dir' is on PATH, then run:" \
+  '  dhx'
