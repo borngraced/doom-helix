@@ -1,4 +1,5 @@
 target
+target-agent-check
 .direnv
 helix-term/rustfmt.toml
 result
