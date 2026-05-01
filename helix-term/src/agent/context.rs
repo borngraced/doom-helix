@@ -145,7 +145,7 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         .map(|(index, range)| {
             let start = coords_at_pos(text, range.from());
             let end = coords_at_pos(text, range.to());
-            let empty = range.is_empty();
+            let empty = range.is_empty() || range.len() <= 1;
             let selected_text = if empty {
                 String::new()
             } else {

@@ -16,7 +16,7 @@ use crate::graphics::UnderlineStyle;
 pub use crate::graphics::{Color, Modifier, Style};
 
 pub static DEFAULT_THEME_DATA: Lazy<Value> = Lazy::new(|| {
-    let bytes = include_bytes!("../../theme.toml");
+    let bytes = include_bytes!("../../runtime/themes/amberwood.toml");
     toml::from_str(str::from_utf8(bytes).unwrap()).expect("Failed to parse base default theme")
 });
 
@@ -26,7 +26,7 @@ pub static BASE16_DEFAULT_THEME_DATA: Lazy<Value> = Lazy::new(|| {
 });
 
 pub static DEFAULT_THEME: Lazy<Theme> = Lazy::new(|| Theme {
-    name: "default".into(),
+    name: "amberwood".into(),
     ..Theme::from(DEFAULT_THEME_DATA.clone())
 });
 

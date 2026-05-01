@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="DoomHelix is an agentic Helix fork with native ACP agents, editor context, permission prompts, and a real in-editor transcript panel."
+    >
+    <title>DoomHelix | Agentic Helix</title>
+    <link rel="stylesheet" href="./site.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="DoomHelix home">
+        <span class="brand-mark">dhx</span>
+        <span>DoomHelix</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#workflow">Workflow</a>
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="./agent.md">Docs</a>
+      </nav>
+      <a class="repo-link" href="https://github.com/borngraced/doom-helix">GitHub</a>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-scene" aria-hidden="true">
+          <div class="editor-shell">
+            <div class="editor-tabs">
+              <span class="mode-pill">NORMAL</span>
+              <span class="tab active">server/userHandler.go</span>
+              <span class="tab">[agent]</span>
+              <span class="tab">config.toml</span>
+              <span class="tab ghost">doom-helix</span>
+            </div>
+            <div class="editor-grid">
+              <aside class="gutter">
+                <span>17</span><span>18</span><span>19</span><span>20</span><span>21</span><span>22</span>
+              </aside>
+              <pre class="code-pane"><code><span class="kw">func</span> <span class="fn">(u *UserHandler) List</span>(w http.ResponseWriter, r *http.Request) {
+  users, err := u.service.List(r.Context())
+  <span class="kw">if</span> err != <span class="lit">nil</span> {
+    http.Error(w, err.Error(), http.StatusBadRequest)
+    <span class="kw">return</span>
+  }
+}</code></pre>
+              <section class="agent-pane">
+                <div class="agent-title">[agent] Claude Code</div>
+                <p class="speaker">You</p>
+                <p>Explain this selected code.</p>
+                <p class="speaker">Claude Code</p>
+                <p>This handler fetches users from the service layer, returns a bad request on failure, and keeps the request context attached.</p>
+                <div class="approval-line">request_permission: edit server/userHandler.go</div>
+              </section>
+            </div>
+            <div class="commandline">:agent position right · :agent resize +5 · :agent explain</div>
+            <div class="statusline">
+              <span class="status-mode">NORMAL</span>
+              <span>main</span>
+              <span>server/userHandler.go [+]</span>
+              <span>go</span>
+              <span>ACP e2a0392a</span>
+              <span>22:1</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-copy">
+          <p class="eyebrow">Native ACP agents for Helix</p>
+          <h1 id="hero-title">DoomHelix</h1>
+          <p class="hero-subtitle">
+            A Helix fork with long-lived coding agents, selected-code context, permission prompts,
+            transcript panels, and installable Codex or Claude ACP backends.
+          </p>
+          <div class="hero-actions">
+            <a class="primary-action" href="#install">Install</a>
+            <a class="secondary-action" href="#workflow">See workflow</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="strip" aria-label="Core capabilities">
+        <div>
+          <span class="metric">ACP</span>
+          <p>Protocol-native sessions</p>
+        </div>
+        <div>
+          <span class="metric">1</span>
+          <p>Managed agent panel</p>
+        </div>
+        <div>
+          <span class="metric">dhx</span>
+          <p>Standalone binary</p>
+        </div>
+        <div>
+          <span class="metric">Codex + Claude</span>
+          <p>Backend choice</p>
+        </div>
+      </section>
+
+      <section id="workflow" class="workflow">
+        <div class="section-heading">
+          <p class="eyebrow">Editor-first flow</p>
+          <h2>The agent lives where the code is.</h2>
+        </div>
+        <div class="workflow-grid">
+          <article>
+            <span class="step">01</span>
+            <h3>Select code</h3>
+            <p>Use normal Helix selection. DoomHelix attaches the selected block, file path, language, cursor, diagnostics, workspace root, and visible editor state.</p>
+          </article>
+          <article>
+            <span class="step">02</span>
+            <h3>Ask naturally</h3>
+            <p>`:agent explain`, `:agent fix`, `:agent refactor`, `:agent edit`, or `:agent chat` route through one active ACP session.</p>
+          </article>
+          <article>
+            <span class="step">03</span>
+            <h3>Approve changes</h3>
+            <p>Tool calls and file edits go through editor prompts, so agent power stays visible and controlled.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="features" class="features">
+        <div class="feature-copy">
+          <p class="eyebrow">Built for serious sessions</p>
+          <h2>Not a wrapper. A real editor integration.</h2>
+          <p>
+            DoomHelix avoids the throwaway `codex exec` loop. It talks ACP, keeps a live session,
+            streams into a selectable transcript, and understands which file or selection you mean.
+          </p>
+        </div>
+        <div class="feature-list">
+          <div class="feature-row">
+            <h3>Context on every turn</h3>
+            <p>Active file, selections, language, diagnostics, workspace root, command history, and theme metadata.</p>
+          </div>
+          <div class="feature-row">
+            <h3>Movable panel</h3>
+            <p>`:agent position left`, `right`, `top`, or `bottom`; resize with `:agent resize +5` and `-5`.</p>
+          </div>
+          <div class="feature-row">
+            <h3>ACP backends</h3>
+            <p>Use Codex ACP, Claude Code ACP, both, or configure a custom ACP-compatible agent.</p>
+          </div>
+          <div class="feature-row">
+            <h3>Patch escape hatch</h3>
+            <p>Direct edits are the main path, but diff preview and `git apply` workflows are still available.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="config-showcase" aria-labelledby="config-title">
+        <div>
+          <p class="eyebrow">Flat config</p>
+          <h2 id="config-title">No nested server maze.</h2>
+          <p>
+            The common path is one active ACP agent. `command` implies stdio; `url` implies WebSocket.
+          </p>
+        </div>
+        <div class="code-card">
+          <button class="copy-button" data-copy="#config-snippet">Copy</button>
+          <pre id="config-snippet"><code>[editor.agent]
+enable = true
+name = "claude"
+command = "claude-code-acp"
+args = []
+panel-position = "right"
+panel-size = 30</code></pre>
+        </div>
+      </section>
+
+      <section id="install" class="install">
+        <div class="install-copy">
+          <p class="eyebrow">Install</p>
+          <h2>One command, then choose your agent.</h2>
+          <p>
+            The installer asks for Codex, Claude, both, or custom ACP later. It keeps existing
+            config files untouched and installs npm-based adapters under `~/.local` by default.
+          </p>
+        </div>
+        <div class="terminal-card">
+          <button class="copy-button" data-copy="#install-command">Copy</button>
+          <pre id="install-command"><code>curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/agentic-acp-integration/install.sh | sh</code></pre>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>DoomHelix</span>
+      <a href="./agent.md">Agent docs</a>
+      <a href="https://github.com/borngraced/doom-helix">Repository</a>
+    </footer>
+
+    <script src="./site.js"></script>
+  </body>
+</html>

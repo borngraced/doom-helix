@@ -1,0 +1,535 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1014;
+  --panel: #1b1b1d;
+  --panel-2: #2a2a2d;
+  --line: #3e3e43;
+  --text: #c9c7cd;
+  --muted: #9998a8;
+  --soft: #57575f;
+  --green: #90b99f;
+  --gold: #e5c890;
+  --blue: #8eb6f5;
+  --pink: #e29eca;
+  --red: #e78284;
+  --ink: #0f1014;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.topbar {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 28px;
+  background: rgba(15, 16, 20, 0.92);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(14px);
+}
+
+.brand,
+.nav-links {
+  display: flex;
+  align-items: center;
+}
+
+.brand {
+  gap: 10px;
+  font-weight: 800;
+}
+
+.brand-mark,
+.agent-title,
+.metric,
+pre,
+.statusline,
+.editor-tabs,
+.approval-line,
+.commandline,
+.eyebrow {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 28px;
+  border: 1px solid var(--line);
+  color: var(--green);
+}
+
+.nav-links {
+  gap: 22px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.repo-link,
+.primary-action,
+.secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.repo-link:hover,
+.nav-links a:hover,
+.footer a:hover {
+  color: var(--green);
+}
+
+.hero {
+  position: relative;
+  min-height: 860px;
+  display: grid;
+  grid-template-columns: minmax(320px, 0.8fr) minmax(440px, 1.2fr);
+  gap: 40px;
+  align-items: center;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 70px 28px 58px;
+}
+
+.hero-copy {
+  max-width: 660px;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 18px;
+  font-size: clamp(64px, 9vw, 130px);
+  line-height: 0.9;
+  letter-spacing: 0;
+}
+
+h2 {
+  margin-bottom: 18px;
+  font-size: clamp(34px, 5vw, 64px);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+h3 {
+  margin-bottom: 10px;
+  font-size: 21px;
+}
+
+.hero-subtitle,
+.workflow p,
+.feature-copy p,
+.feature-row p,
+.install-copy p,
+.config-showcase p,
+.strip p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.hero-subtitle {
+  font-size: clamp(18px, 2vw, 23px);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.primary-action {
+  border-color: var(--green);
+  background: var(--green);
+  color: var(--ink);
+}
+
+.secondary-action {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hero-scene {
+  min-width: 0;
+}
+
+.editor-shell {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.editor-tabs,
+.statusline,
+.commandline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.editor-tabs,
+.statusline,
+.agent-pane {
+  border-color: var(--line);
+}
+
+.editor-tabs {
+  border-bottom: 1px solid var(--line);
+}
+
+.mode-pill,
+.status-mode {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  background: var(--gold);
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.tab {
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+
+.tab.active {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.tab.ghost {
+  margin-left: auto;
+  color: var(--soft);
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) minmax(260px, 36%);
+  min-height: 500px;
+}
+
+.gutter {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding-top: 26px;
+  border-right: 1px solid var(--line);
+  color: var(--soft);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  text-align: right;
+}
+
+.gutter span {
+  padding-right: 12px;
+}
+
+.code-pane {
+  margin: 0;
+  padding: 24px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: clamp(12px, 1.3vw, 16px);
+  line-height: 1.75;
+}
+
+.kw {
+  color: var(--green);
+}
+
+.fn {
+  color: var(--blue);
+}
+
+.lit {
+  color: var(--gold);
+}
+
+.agent-pane {
+  border-left: 1px solid var(--line);
+  padding: 22px;
+  background: #151518;
+  font-size: 14px;
+  line-height: 1.58;
+}
+
+.agent-title {
+  width: fit-content;
+  margin-bottom: 18px;
+  padding: 5px 8px;
+  border: 1px solid rgba(125, 240, 166, 0.35);
+  color: var(--green);
+  font-size: 12px;
+}
+
+.speaker {
+  margin-bottom: 6px;
+  color: var(--gold);
+  font-weight: 800;
+}
+
+.approval-line {
+  margin-top: 18px;
+  padding: 10px;
+  border: 1px solid rgba(229, 200, 144, 0.42);
+  color: var(--gold);
+  font-size: 12px;
+}
+
+.commandline {
+  min-height: 38px;
+  border-top: 1px solid var(--line);
+  color: var(--gold);
+  background: #151518;
+}
+
+.commandline::before {
+  content: ">";
+  color: var(--green);
+}
+
+.statusline {
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.strip div {
+  min-height: 128px;
+  padding: 24px 28px;
+  border-right: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.strip div:last-child {
+  border-right: 0;
+}
+
+.metric {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--gold);
+  font-size: clamp(20px, 2.5vw, 34px);
+  font-weight: 700;
+}
+
+.workflow,
+.features,
+.config-showcase,
+.install {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 92px 28px;
+}
+
+.section-heading {
+  margin-bottom: 34px;
+}
+
+.workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--line);
+}
+
+.workflow-grid article {
+  min-height: 270px;
+  padding: 28px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.workflow-grid article:last-child {
+  border-right: 0;
+}
+
+.step {
+  display: block;
+  margin-bottom: 54px;
+  color: var(--gold);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+}
+
+.features,
+.config-showcase,
+.install {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
+  gap: 52px;
+  align-items: start;
+}
+
+.feature-list {
+  border-top: 1px solid var(--line);
+}
+
+.feature-row {
+  display: grid;
+  grid-template-columns: 0.55fr 1fr;
+  gap: 24px;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.code-card,
+.terminal-card {
+  position: relative;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+pre {
+  margin: 0;
+  overflow-x: auto;
+  padding: 26px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.copy-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  min-width: 62px;
+  height: 32px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.copy-button:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.footer {
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+  padding: 28px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 980px) {
+  .hero,
+  .features,
+  .config-showcase,
+  .install {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
+    min-height: auto;
+    padding-top: 52px;
+  }
+
+  .strip,
+  .workflow-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .editor-grid {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .agent-pane {
+    grid-column: 1 / -1;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    padding: 12px 16px;
+  }
+
+  .nav-links,
+  .repo-link {
+    display: none;
+  }
+
+  .hero,
+  .workflow,
+  .features,
+  .config-showcase,
+  .install {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .strip,
+  .workflow-grid,
+  .feature-row {
+    grid-template-columns: 1fr;
+  }
+
+  .strip div,
+  .workflow-grid article {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  h1 {
+    font-size: 64px;
+  }
+}

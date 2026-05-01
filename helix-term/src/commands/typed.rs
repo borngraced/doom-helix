@@ -5886,10 +5886,58 @@ fn complete_command_line(editor: &Editor, input: &str) -> Vec<ui::prompt::Comple
         TYPABLE_COMMAND_MAP
             .get(command)
             .map_or_else(Vec::new, |cmd| {
-                let args_offset = command.len() + 1;
-                complete_command_args(editor, cmd.signature, &cmd.completer, rest, args_offset)
+                if command == "agent" {
+                    let args_offset = command.len() + 1;
+                    let completions = complete_agent_command_args(rest, args_offset);
+                    if !completions.is_empty() {
+                        return completions;
+                    }
+                }
+
+                {
+                    let args_offset = command.len() + 1;
+                    complete_command_args(editor, cmd.signature, &cmd.completer, rest, args_offset)
+                }
             })
     }
+}
+
+fn complete_agent_command_args(input: &str, offset: usize) -> Vec<ui::prompt::Completion> {
+    let leading = input.len() - input.trim_start().len();
+    let input = &input[leading..];
+    let base_offset = offset + leading;
+
+    let Some(first_space) = input.find(char::is_whitespace) else {
+        return complete_agent_values(AGENT_SUBCOMMANDS, input, base_offset);
+    };
+
+    let subcommand = &input[..first_space];
+    let rest = &input[first_space..];
+    let value_leading = rest.len() - rest.trim_start().len();
+    let value = &rest[value_leading..];
+    if value.contains(char::is_whitespace) {
+        return Vec::new();
+    }
+
+    let value_offset = base_offset + first_space + value_leading;
+    match subcommand {
+        "position" => {
+            complete_agent_values(&["left", "right", "top", "bottom"], value, value_offset)
+        }
+        "resize" => complete_agent_values(&["30", "40", "+5", "-5"], value, value_offset),
+        _ => Vec::new(),
+    }
+}
+
+fn complete_agent_values(
+    values: &'static [&'static str],
+    input: &str,
+    offset: usize,
+) -> Vec<ui::prompt::Completion> {
+    fuzzy_match(input, values.iter().copied(), false)
+        .into_iter()
+        .map(|(value, _)| ((offset).., value.into()))
+        .collect()
 }
 
 pub fn complete_command_args(
