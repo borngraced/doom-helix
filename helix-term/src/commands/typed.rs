@@ -814,18 +814,40 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
                                 let apply_cwd = apply_cwd.clone();
                                 cx.editor.set_status("Applying agent patch...");
                                 cx.jobs.callback(async move {
-                                    apply_agent_patch_with_git(patch, apply_cwd).await?;
-                                    Ok(job::Callback::Editor(Box::new(|editor| {
-                                        let (reloaded, skipped) =
-                                            reload_unmodified_file_documents(editor);
-                                        if skipped == 0 {
-                                            editor.set_status(format!(
-                                                "Agent patch applied; reloaded {reloaded} buffer(s)"
-                                            ));
-                                        } else {
-                                            editor.set_status(format!(
-                                                "Agent patch applied; reloaded {reloaded} buffer(s), skipped {skipped} modified buffer(s)"
-                                            ));
+                                    let result =
+                                        apply_agent_patch_with_git(patch.clone(), apply_cwd).await;
+                                    Ok(job::Callback::Editor(Box::new(move |editor| {
+                                        match result {
+                                            Ok(()) => {
+                                                let (reloaded, skipped) =
+                                                    reload_unmodified_file_documents(editor);
+                                                if skipped == 0 {
+                                                    editor.set_status(format!(
+                                                        "Agent patch applied; reloaded {reloaded} buffer(s)"
+                                                    ));
+                                                } else {
+                                                    editor.set_status(format!(
+                                                        "Agent patch applied; reloaded {reloaded} buffer(s), skipped {skipped} modified buffer(s)"
+                                                    ));
+                                                }
+                                            }
+                                            Err(error) => {
+                                                let diagnostics =
+                                                    agent_patch_apply_diagnostics(&error, &patch);
+                                                if let Err(open_error) = open_agent_scratch_editor(
+                                                    editor,
+                                                    diagnostics,
+                                                    "markdown",
+                                                ) {
+                                                    editor.set_error(format!(
+                                                        "Agent patch apply failed: {error}; also failed to open diagnostics: {open_error}"
+                                                    ));
+                                                } else {
+                                                    editor.set_error(
+                                                        "Agent patch apply failed; opened diagnostics",
+                                                    );
+                                                }
+                                            }
                                         }
                                     })))
                                 });
@@ -838,6 +860,14 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
             },
         )))
     });
+}
+
+fn agent_patch_apply_diagnostics(error: &anyhow::Error, patch: &str) -> String {
+    format!(
+        "# Agent Patch Apply Failed\n\n{}\n\n## Patch Helix Tried To Apply\n\n```diff\n{}\n```\n",
+        error,
+        patch.trim()
+    )
 }
 
 async fn apply_agent_patch_with_git(patch: String, cwd: PathBuf) -> anyhow::Result<()> {
