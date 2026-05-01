@@ -228,6 +228,19 @@ async fn handle_agent_request(message: &JsonRpcMessage) -> anyhow::Result<Option
     };
 
     match request.method.as_str() {
+        "session/request_permission" => {
+            let option_id = prompt_acp_permission(request.params.clone()).await?;
+            Ok(Some(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "result": {
+                    "outcome": {
+                        "outcome": "selected",
+                        "optionId": option_id
+                    }
+                }
+            })))
+        }
         "agent/approval" => {
             let decision = prompt_agent_approval(request.params.clone()).await?;
             Ok(Some(serde_json::json!({
@@ -249,6 +262,91 @@ async fn handle_agent_request(message: &JsonRpcMessage) -> anyhow::Result<Option
     }
 }
 
+async fn prompt_acp_permission(params: Option<Value>) -> anyhow::Result<String> {
+    let params = params.unwrap_or(Value::Null);
+    let title = params
+        .get("toolCall")
+        .and_then(|tool_call| tool_call.get("title"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            params
+                .get("tool_call")
+                .and_then(|tool_call| tool_call.get("title"))
+                .and_then(Value::as_str)
+        })
+        .unwrap_or("Approve agent tool call?");
+    let body = acp_permission_body(&params);
+    let options = params
+        .get("options")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let allow_option = acp_permission_option(&options, true)
+        .or_else(|| options.first().and_then(acp_permission_option_id))
+        .unwrap_or_else(|| "allow".to_string());
+    let reject_option =
+        acp_permission_option(&options, false).unwrap_or_else(|| "deny".to_string());
+    let accepted = prompt_yes_no(title, body).await?;
+    Ok(if accepted {
+        allow_option
+    } else {
+        reject_option
+    })
+}
+
+fn acp_permission_option(options: &[Value], allow: bool) -> Option<String> {
+    options.iter().find_map(|option| {
+        let kind = option.get("kind").and_then(Value::as_str).unwrap_or("");
+        let name = option.get("name").and_then(Value::as_str).unwrap_or("");
+        let is_allow = kind.starts_with("allow") || name.to_ascii_lowercase().contains("allow");
+        let is_reject = kind.starts_with("reject")
+            || name.to_ascii_lowercase().contains("deny")
+            || name.to_ascii_lowercase().contains("reject");
+        ((allow && is_allow) || (!allow && is_reject))
+            .then(|| acp_permission_option_id(option))
+            .flatten()
+    })
+}
+
+fn acp_permission_option_id(option: &Value) -> Option<String> {
+    option
+        .get("optionId")
+        .or_else(|| option.get("option_id"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn acp_permission_body(params: &Value) -> String {
+    let Some(tool_call) = params.get("toolCall").or_else(|| params.get("tool_call")) else {
+        return serde_json::to_string_pretty(params).unwrap_or_else(|_| params.to_string());
+    };
+
+    let mut sections = Vec::new();
+    if let Some(kind) = tool_call.get("kind").and_then(Value::as_str) {
+        sections.push(format!("Kind:\n{kind}"));
+    }
+    if let Some(content) = tool_call.get("content") {
+        sections.push(format!(
+            "Details:\n{}",
+            serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string())
+        ));
+    }
+    if let Some(raw_input) = tool_call
+        .get("rawInput")
+        .or_else(|| tool_call.get("raw_input"))
+    {
+        sections.push(format!(
+            "Input:\n{}",
+            serde_json::to_string_pretty(raw_input).unwrap_or_else(|_| raw_input.to_string())
+        ));
+    }
+    if sections.is_empty() {
+        serde_json::to_string_pretty(tool_call).unwrap_or_else(|_| tool_call.to_string())
+    } else {
+        sections.join("\n\n")
+    }
+}
+
 async fn prompt_agent_approval(params: Option<Value>) -> anyhow::Result<&'static str> {
     let params = params.unwrap_or(Value::Null);
     let title = params
@@ -260,6 +358,14 @@ async fn prompt_agent_approval(params: Option<Value>) -> anyhow::Result<&'static
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+    Ok(if prompt_yes_no(title, body).await? {
+        "accept"
+    } else {
+        "decline"
+    })
+}
+
+async fn prompt_yes_no(title: &str, body: String) -> anyhow::Result<bool> {
     let prompt = format!("{title} [y/N] ");
     let (tx, rx) = oneshot::channel::<bool>();
     crate::job::dispatch_blocking(move |editor, compositor| {
@@ -300,11 +406,7 @@ async fn prompt_agent_approval(params: Option<Value>) -> anyhow::Result<&'static
         compositor.push(Box::new(prompt));
     });
 
-    Ok(if rx.await.unwrap_or(false) {
-        "accept"
-    } else {
-        "decline"
-    })
+    Ok(rx.await.unwrap_or(false))
 }
 
 pub async fn send_prompt(prompt: String, meta: Option<Value>) -> anyhow::Result<u64> {

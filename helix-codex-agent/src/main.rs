@@ -344,7 +344,7 @@ impl CodexAppServer {
             "method": "thread/start",
             "params": {
                 "cwd": cwd,
-                "approvalPolicy": "on-request",
+                "approvalPolicy": "untrusted",
                 "approvalsReviewer": "user",
                 "sandbox": "workspace-write",
                 "experimentalRawEvents": false,
@@ -377,6 +377,8 @@ impl CodexAppServer {
             "method": "turn/start",
             "params": {
                 "threadId": self.thread_id,
+                "approvalPolicy": "untrusted",
+                "approvalsReviewer": "user",
                 "input": [
                     {
                         "type": "text",
@@ -548,6 +550,30 @@ impl CodexAppServer {
                     "decision": if accepted { "approved" } else { "denied" }
                 }
             }),
+            "item/permissions/requestApproval" => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": if accepted {
+                    {
+                        let permissions = message
+                            .get("params")
+                            .and_then(|params| params.get("permissions"))
+                            .cloned()
+                            .unwrap_or_else(|| json!({}));
+                        json!({
+                            "permissions": permissions,
+                            "scope": "turn",
+                            "strictAutoReview": true
+                        })
+                    }
+                } else {
+                    json!({
+                        "permissions": {},
+                        "scope": "turn",
+                        "strictAutoReview": true
+                    })
+                }
+            }),
             _ => unreachable!(),
         };
         self.send_app_request(response)?;
@@ -567,6 +593,9 @@ impl CodexAppServer {
         let response = match method {
             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
                 json!({ "jsonrpc": "2.0", "id": id, "result": { "decision": "decline" } })
+            }
+            "item/permissions/requestApproval" => {
+                json!({ "jsonrpc": "2.0", "id": id, "result": { "permissions": {}, "scope": "turn", "strictAutoReview": true } })
             }
             "applyPatchApproval" | "execCommandApproval" => {
                 json!({ "jsonrpc": "2.0", "id": id, "result": { "decision": "denied" } })
@@ -668,6 +697,22 @@ fn app_server_approval_prompt(
                 kind: "file_change",
                 title: "Allow file changes?".to_string(),
                 body: format_approval_body("file write access", root, reason),
+            })
+        }
+        "item/permissions/requestApproval" => {
+            let cwd = params.get("cwd").and_then(Value::as_str).unwrap_or("");
+            let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
+            let permissions = params
+                .get("permissions")
+                .map(|permissions| {
+                    serde_json::to_string_pretty(permissions)
+                        .unwrap_or_else(|_| permissions.to_string())
+                })
+                .unwrap_or_default();
+            Some(AppServerApprovalPrompt {
+                kind: "permissions",
+                title: "Grant agent permissions?".to_string(),
+                body: format_approval_body(&permissions, cwd, reason),
             })
         }
         "applyPatchApproval" => {
