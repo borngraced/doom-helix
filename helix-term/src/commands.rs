@@ -62,6 +62,19 @@ use arc_swap::access::DynAccess;
 use insert::*;
 use movement::Movement;
 
+fn current_document_is_agent_owned(editor: &Editor) -> bool {
+    let (_, doc) = current_ref!(editor);
+    document_is_agent_owned(doc)
+}
+
+fn document_is_agent_owned(doc: &Document) -> bool {
+    doc.path().is_none()
+        && matches!(
+            doc.display_name().as_ref(),
+            "[agent]" | "[agent patch]" | "[agent apply diagnostics]" | "[agent json]"
+        )
+}
+
 use crate::{
     compositor::{self, Component, Compositor},
     filter_picker_entry,
@@ -247,6 +260,12 @@ macro_rules! static_commands {
 
 impl MappableCommand {
     pub fn execute(&self, cx: &mut Context) {
+        if self.mutates_document() && current_document_is_agent_owned(cx.editor) {
+            cx.editor
+                .set_error("Agent buffer is generated; use :agent commands to change it");
+            return;
+        }
+
         match &self {
             Self::Typable { name, args, doc: _ } => {
                 if let Some(command) = typed::TYPABLE_COMMAND_MAP.get(name.as_str()) {
@@ -299,6 +318,61 @@ impl MappableCommand {
             Self::Static { doc, .. } => doc,
             Self::Macro { name, .. } => name,
         }
+    }
+
+    fn mutates_document(&self) -> bool {
+        let Self::Static { name, .. } = self else {
+            return false;
+        };
+
+        matches!(
+            *name,
+            "replace"
+                | "delete_selection"
+                | "delete_selection_noyank"
+                | "change_selection"
+                | "change_selection_noyank"
+                | "insert_mode"
+                | "append_mode"
+                | "insert_at_line_start"
+                | "insert_at_line_end"
+                | "open_below"
+                | "open_above"
+                | "add_newline_above"
+                | "add_newline_below"
+                | "smart_tab"
+                | "insert_tab"
+                | "insert_newline"
+                | "insert_char_interactive"
+                | "append_char_interactive"
+                | "delete_char_backward"
+                | "delete_char_forward"
+                | "delete_word_backward"
+                | "delete_word_forward"
+                | "kill_to_line_start"
+                | "kill_to_line_end"
+                | "undo"
+                | "redo"
+                | "replace_with_yanked"
+                | "replace_selections_with_clipboard"
+                | "replace_selections_with_primary_clipboard"
+                | "paste_after"
+                | "paste_before"
+                | "paste_clipboard_after"
+                | "paste_clipboard_before"
+                | "paste_primary_clipboard_after"
+                | "paste_primary_clipboard_before"
+                | "indent"
+                | "unindent"
+                | "format_selections"
+                | "join_selections"
+                | "join_selections_space"
+                | "align_selections"
+                | "toggle_comments"
+                | "surround_add"
+                | "surround_replace"
+                | "surround_delete"
+        )
     }
 
     #[rustfmt::skip]
@@ -4291,6 +4365,12 @@ pub mod insert {
     use helix_view::editor::SmartTabConfig;
 
     pub fn insert_char(cx: &mut Context, c: char) {
+        if current_document_is_agent_owned(cx.editor) {
+            cx.editor
+                .set_error("Agent buffer is generated; use :agent commands to change it");
+            return;
+        }
+
         let (view, doc) = current_ref!(cx.editor);
         let text = doc.text();
         let selection = doc.selection(view.id);
