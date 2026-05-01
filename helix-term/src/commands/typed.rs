@@ -17,6 +17,23 @@ use helix_view::expansion;
 use serde_json::Value;
 use ui::completers::{self, Completer};
 
+const AGENT_SUBCOMMANDS: &[&str] = &[
+    "ask",
+    "chat",
+    "context",
+    "explain",
+    "fix",
+    "refactor",
+    "new",
+    "acp",
+    "launch-config",
+    "start",
+    "status",
+    "stop",
+    "recv",
+    "prompt",
+];
+
 #[derive(Clone)]
 pub struct TypableCommand {
     pub name: &'static str,
@@ -687,6 +704,25 @@ fn chat_agent(cx: &mut compositor::Context) {
     });
 }
 
+fn explain_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
+    prompt_agent_turn(cx, "Explain this selected code.".to_string())
+}
+
+fn fix_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
+    prompt_agent_turn(
+        cx,
+        "Find the bug or problem in this selected code and propose a fix. Do not edit files yet."
+            .to_string(),
+    )
+}
+
+fn refactor_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
+    prompt_agent_turn(
+        cx,
+        "Suggest a clean refactor for this selected code. Do not edit files yet.".to_string(),
+    )
+}
+
 fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Result<()> {
     let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
     let meta = serde_json::json!({
@@ -869,6 +905,9 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
             chat_agent(cx);
             Ok(())
         }
+        Some("explain") => explain_agent(cx),
+        Some("fix") => fix_agent(cx),
+        Some("refactor") => refactor_agent(cx),
         Some("status") => {
             show_agent_status(cx);
             Ok(())
@@ -883,6 +922,13 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         }
         Some(command) => bail!("unknown agent command: {command}"),
     }
+}
+
+fn complete_agent_subcommand(_editor: &Editor, input: &str) -> Vec<ui::prompt::Completion> {
+    fuzzy_match(input, AGENT_SUBCOMMANDS.iter().copied(), false)
+        .into_iter()
+        .map(|(subcommand, _)| ((0..), subcommand.into()))
+        .collect()
 }
 
 fn agent_context(
@@ -3443,7 +3489,7 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         aliases: &[],
         doc: "Run an agent command. With no subcommand, opens the current context snapshot.",
         fun: agent,
-        completer: CommandCompleter::none(),
+        completer: CommandCompleter::positional(&[complete_agent_subcommand]),
         signature: Signature {
             positionals: (0, None),
             raw_after: Some(1),

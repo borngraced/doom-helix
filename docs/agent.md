@@ -51,6 +51,18 @@ Sends a `session/prompt` request to the running agent. The prompt includes a fre
 
 Opens an agent prompt in Helix's prompt UI. When submitted, Helix sends the prompt with a fresh context snapshot, automatically reads any pending handshake messages, waits for the prompt turn to finish, and opens the agent text in a Markdown scratch buffer.
 
+`:agent explain`
+
+Explains the current primary selection. The selected text is included directly in the prompt with file path and line/column range.
+
+`:agent fix`
+
+Asks Codex to identify a problem in the current primary selection and propose a fix without editing files.
+
+`:agent refactor`
+
+Asks Codex to suggest a clean refactor for the current primary selection without editing files.
+
 `:agent-context`
 
 Compatibility command that opens the same context snapshot directly.
