@@ -2,7 +2,7 @@
 
 This is an experimental fork-only surface for exploring editor-native coding agents in Helix.
 
-The initial implementation is intentionally read-only. It focuses on making Helix produce a stable, structured context payload before adding subprocesses, ACP transport, edit tools, or shell execution.
+The agent process is intentionally read-only. Codex can explain code and propose patches, while Helix owns the write step: it stores the latest patch proposal, lets the user inspect it, and applies it only after confirmation.
 
 ## Commands
 
@@ -68,7 +68,7 @@ Starts the configured agent first if needed.
 
 `:agent edit`
 
-Asks Codex to return a unified diff patch proposal for the current primary selection. This is read-only: Helix appends the patch proposal to the transcript and does not apply it.
+Asks Codex to return a git-apply compatible unified diff patch proposal for the current primary selection. Codex does not write files; Helix stores the patch for `:agent patch` and `:agent apply`.
 Starts the configured agent first if needed.
 
 `:agent patch`
@@ -160,7 +160,7 @@ cargo build -p helix-codex-agent
 
 Then configure Helix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to Helix and forwards prompt turns to `codex exec --skip-git-repo-check --sandbox read-only` with the current Helix context included in stdin. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
 
-The adapter is intentionally read-only for now. It should return explanations or proposed patches, not write files directly. Helix-side write approval prompts will require a later edit/apply workflow where Codex proposes a patch and Helix previews it before applying.
+The adapter is intentionally read-only. It should return explanations or proposed patches, not write files directly. For edits, Codex returns a unified diff; Helix previews it with `:agent patch` and applies it with `:agent apply` only after confirmation.
 
 ## Suggested Keymap
 

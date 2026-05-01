@@ -733,7 +733,7 @@ fn refactor_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
 fn edit_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
     prompt_agent_turn(
         cx,
-        "Propose an edit for this selected code. Return a unified diff patch only, with enough surrounding context to review. Do not modify files."
+        "Propose an edit for this selected code. Return a git-apply compatible unified diff patch only, with file paths and enough surrounding context. Do not modify files."
             .to_string(),
         true,
     )

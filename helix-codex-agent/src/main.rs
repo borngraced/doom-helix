@@ -170,7 +170,7 @@ fn codex_prompt(prompt: &str, meta: Option<&Value>) -> String {
 
     match context {
         Some(context) => format!(
-            "You are being invoked from Helix through ACP.\n\nFor this adapter MVP, do not modify files or run write operations. If code changes are needed, describe the change or provide a patch/diff in your final answer for Helix to review later.\n\nHelix editor context JSON:\n```json\n{}\n```\n\nUser prompt:\n{}",
+            "You are being invoked from Helix through ACP.\n\nDo not modify files or run write operations. If code changes are requested, return a git-apply compatible unified diff in your final answer. Helix will let the user inspect and explicitly apply that patch.\n\nHelix editor context JSON:\n```json\n{}\n```\n\nUser prompt:\n{}",
             serde_json::to_string_pretty(context).unwrap_or_else(|_| context.to_string()),
             prompt
         ),
