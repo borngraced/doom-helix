@@ -88,6 +88,14 @@ Prompts for confirmation, then applies the latest stored agent patch with `git a
 Opens or focuses the agent transcript buffer. The split direction follows `[editor.agent].panel-position`.
 There is one agent transcript per running agent runtime; new chat/action turns append to that transcript.
 
+`:agent next`
+
+Moves the cursor to the next turn in the agent transcript.
+
+`:agent prev`
+
+Moves the cursor to the previous turn in the agent transcript.
+
 `:agent clear`
 
 Clears the agent transcript buffer without stopping the running agent process.

@@ -30,11 +30,13 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "explain",
     "fix",
     "refactor",
+    "next",
     "new",
     "acp",
     "launch-config",
     "panel",
     "patch",
+    "prev",
     "start",
     "status",
     "stop",
@@ -793,6 +795,42 @@ fn clear_agent_panel(cx: &mut compositor::Context) {
     crate::agent::runtime::clear_transcript_turns();
     render_agent_transcript_editor(cx.editor, doc_id, view_id);
     cx.editor.set_status("Agent transcript cleared");
+}
+
+fn goto_agent_turn(cx: &mut compositor::Context, next: bool) {
+    let Some(doc_id) = crate::agent::runtime::transcript_doc_id()
+        .filter(|doc_id| cx.editor.document(*doc_id).is_some())
+    else {
+        cx.editor.set_error("No agent transcript is available");
+        return;
+    };
+
+    let scrolloff = cx.editor.config().scrolloff;
+    let view_id = prepare_agent_transcript_doc(cx.editor, doc_id, Action::Replace);
+    let doc = doc_mut!(cx.editor, &doc_id);
+    let text = doc.text().slice(..).to_string();
+    let cursor = doc
+        .selection(view_id)
+        .primary()
+        .cursor(doc.text().slice(..));
+    let cursor_byte = doc.text().char_to_byte(cursor);
+    let target_byte = if next {
+        text.match_indices("**You [")
+            .map(|(index, _)| index)
+            .find(|index| *index > cursor_byte)
+    } else {
+        text[..cursor_byte].rfind("**You [")
+    };
+
+    let Some(target_byte) = target_byte else {
+        cx.editor.set_status("No more agent turns");
+        return;
+    };
+
+    let target = doc.text().byte_to_char(target_byte);
+    doc.set_selection(view_id, Selection::point(target));
+    let view = view_mut!(cx.editor, view_id);
+    view.ensure_cursor_in_view(doc, scrolloff);
 }
 
 fn open_agent_patch(cx: &mut compositor::Context) -> anyhow::Result<()> {
@@ -1785,6 +1823,14 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         }
         Some("panel") => {
             open_agent_panel(cx);
+            Ok(())
+        }
+        Some("next") => {
+            goto_agent_turn(cx, true);
+            Ok(())
+        }
+        Some("prev") => {
+            goto_agent_turn(cx, false);
             Ok(())
         }
         Some("clear") => {
