@@ -93,6 +93,28 @@ fn rendered_agent_markdown_scroll(
     scroll
 }
 
+fn rendered_agent_markdown_position(
+    doc: &Document,
+    anchor: usize,
+    editor: &Editor,
+    viewport_width: u16,
+) -> Position {
+    let prefix = doc
+        .text()
+        .slice(..anchor.min(doc.text().len_chars()))
+        .to_string();
+    let markdown = crate::ui::Markdown::new(prefix, editor.syn_loader.clone());
+    let text = markdown.parse(None);
+    let row = text.lines.len().saturating_sub(1);
+    let col = text.lines.last().map(Spans::width).unwrap_or_default();
+    let width = usize::from(viewport_width.max(1));
+
+    Position {
+        row: row + (col / width),
+        col: col % width,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum InsertEvent {
     Key(KeyEvent),
@@ -139,7 +161,7 @@ impl EditorView {
         let view_offset = doc.view_offset(view.id);
 
         if Self::is_agent_transcript_doc(doc) {
-            self.render_agent_transcript_markdown(editor, doc, view, surface);
+            self.render_agent_transcript_markdown(editor, doc, view, surface, is_focused);
             self.render_view_border_and_statusline(
                 editor, doc, view, viewport, surface, is_focused,
             );
@@ -322,6 +344,7 @@ impl EditorView {
         doc: &Document,
         view: &View,
         surface: &mut Surface,
+        is_focused: bool,
     ) {
         use tui::widgets::{Paragraph, Widget, Wrap};
 
@@ -358,6 +381,105 @@ impl EditorView {
             .scroll((scroll, 0));
 
         paragraph.render(viewport, surface);
+        Self::render_agent_transcript_selection(editor, doc, view, viewport, surface, scroll);
+        if is_focused {
+            Self::set_agent_transcript_cursor(editor, doc, view, viewport, scroll, surface);
+        }
+    }
+
+    fn render_agent_transcript_selection(
+        editor: &Editor,
+        doc: &Document,
+        view: &View,
+        viewport: Rect,
+        surface: &mut Surface,
+        scroll: u16,
+    ) {
+        let selection_style = editor.theme.get("ui.selection.primary");
+        for range in doc.selection(view.id).iter() {
+            if range.anchor == range.head {
+                continue;
+            }
+
+            let start = rendered_agent_markdown_position(doc, range.from(), editor, viewport.width);
+            let end = rendered_agent_markdown_position(doc, range.to(), editor, viewport.width);
+            if end.row < scroll as usize || start.row >= scroll as usize + viewport.height as usize
+            {
+                continue;
+            }
+
+            let start_row = start.row.saturating_sub(scroll as usize);
+            let end_row = end.row.saturating_sub(scroll as usize);
+            for row in start_row..=end_row {
+                if row >= viewport.height as usize {
+                    break;
+                }
+
+                let start_col = if row == start_row { start.col } else { 0 };
+                let end_col = if row == end_row {
+                    end.col.max(start_col + 1)
+                } else {
+                    viewport.width as usize
+                };
+                if start_col >= viewport.width as usize {
+                    continue;
+                }
+
+                let width = end_col
+                    .min(viewport.width as usize)
+                    .saturating_sub(start_col)
+                    .max(1);
+                surface.set_style(
+                    Rect::new(
+                        viewport.x + start_col as u16,
+                        viewport.y + row as u16,
+                        width as u16,
+                        1,
+                    ),
+                    selection_style,
+                );
+            }
+        }
+    }
+
+    fn set_agent_transcript_cursor(
+        editor: &Editor,
+        doc: &Document,
+        view: &View,
+        viewport: Rect,
+        scroll: u16,
+        surface: &mut Surface,
+    ) {
+        let cursor = doc
+            .selection(view.id)
+            .primary()
+            .cursor(doc.text().slice(..));
+        let position = rendered_agent_markdown_position(doc, cursor, editor, viewport.width);
+        let Some(row) = position.row.checked_sub(scroll as usize) else {
+            editor.cursor_cache.set(None);
+            return;
+        };
+        if row >= viewport.height as usize || position.col >= viewport.width as usize {
+            editor.cursor_cache.set(None);
+            return;
+        }
+
+        let relative = Position {
+            row,
+            col: position.col,
+        };
+        editor.cursor_cache.set(Some(relative));
+
+        let cursor_style = editor.theme.get("ui.cursor.primary");
+        surface.set_style(
+            Rect::new(
+                viewport.x + relative.col as u16,
+                viewport.y + relative.row as u16,
+                1,
+                1,
+            ),
+            cursor_style,
+        );
     }
 
     pub fn render_rulers(

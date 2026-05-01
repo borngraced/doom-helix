@@ -379,7 +379,7 @@ pub fn render_transcript() -> String {
                     rendered.push_str(response);
                     rendered.push_str("\n\nWorking...");
                 } else {
-                    rendered.push_str(&format!("Working... [turn {}]", turn.id));
+                    rendered.push_str("Working...");
                 }
             }
             AgentTranscriptStatus::Cancelled => rendered.push_str("Cancelled"),
