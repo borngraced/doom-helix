@@ -1,9 +1,12 @@
 use helix_core::coords_at_pos;
+use helix_vcs::FileChange;
 use helix_view::Editor;
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 
 const MAX_SELECTION_TEXT_CHARS: usize = 2_000;
 const MAX_RECENT_COMMANDS: usize = 20;
+const MAX_CHANGED_FILES: usize = 100;
 
 #[derive(Debug, Serialize)]
 pub struct EditorSnapshot {
@@ -18,6 +21,7 @@ pub struct EditorSnapshot {
     pub open_buffers: Vec<BufferSnapshot>,
     pub diagnostics: Vec<DiagnosticSnapshot>,
     pub lsp_servers: Vec<String>,
+    pub git: GitSnapshot,
     pub recent_commands: Vec<String>,
 }
 
@@ -81,6 +85,21 @@ pub struct DiagnosticSnapshot {
     pub severity: Option<String>,
     pub source: Option<String>,
     pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitSnapshot {
+    pub branch: Option<String>,
+    pub changed_files: Vec<FileChangeSnapshot>,
+    pub changed_files_truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FileChangeSnapshot {
+    pub change: &'static str,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_path: Option<String>,
 }
 
 pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
@@ -170,6 +189,8 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         .map(|server| server.name().to_string())
         .collect();
 
+    let git = git_snapshot(editor, doc.path(), &workspace_root);
+
     EditorSnapshot {
         workspace_root: workspace_root.display().to_string(),
         cwd: cwd.display().to_string(),
@@ -199,10 +220,75 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         open_buffers,
         diagnostics,
         lsp_servers,
+        git,
         recent_commands,
     }
 }
 
 pub fn current_snapshot_pretty(editor: &Editor) -> anyhow::Result<String> {
     Ok(serde_json::to_string_pretty(&current_snapshot(editor))?)
+}
+
+fn git_snapshot(
+    editor: &Editor,
+    active_path: Option<&PathBuf>,
+    workspace_root: &Path,
+) -> GitSnapshot {
+    let branch = active_path
+        .and_then(|_| doc!(editor).version_control_head())
+        .map(|head| head.as_ref().as_ref().to_string());
+
+    let changed_files = editor
+        .diff_providers
+        .changed_files(workspace_root)
+        .unwrap_or_default();
+    let changed_files_truncated = changed_files.len() > MAX_CHANGED_FILES;
+    let changed_files = changed_files
+        .into_iter()
+        .take(MAX_CHANGED_FILES)
+        .map(|change| file_change_snapshot(change, workspace_root))
+        .collect();
+
+    GitSnapshot {
+        branch,
+        changed_files,
+        changed_files_truncated,
+    }
+}
+
+fn file_change_snapshot(change: FileChange, root: &Path) -> FileChangeSnapshot {
+    let display_path = |path: &Path| {
+        path.strip_prefix(root)
+            .unwrap_or(path)
+            .display()
+            .to_string()
+    };
+
+    match change {
+        FileChange::Untracked { path } => FileChangeSnapshot {
+            change: "untracked",
+            path: display_path(&path),
+            from_path: None,
+        },
+        FileChange::Modified { path } => FileChangeSnapshot {
+            change: "modified",
+            path: display_path(&path),
+            from_path: None,
+        },
+        FileChange::Conflict { path } => FileChangeSnapshot {
+            change: "conflict",
+            path: display_path(&path),
+            from_path: None,
+        },
+        FileChange::Deleted { path } => FileChangeSnapshot {
+            change: "deleted",
+            path: display_path(&path),
+            from_path: None,
+        },
+        FileChange::Renamed { from_path, to_path } => FileChangeSnapshot {
+            change: "renamed",
+            path: display_path(&to_path),
+            from_path: Some(display_path(&from_path)),
+        },
+    }
 }

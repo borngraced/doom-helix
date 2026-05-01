@@ -6,7 +6,7 @@ use anyhow::{anyhow, bail, Result};
 use arc_swap::ArcSwap;
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 #[cfg(feature = "git")]
@@ -74,6 +74,26 @@ impl DiffProviderRegistry {
                 f(Err(anyhow!("no diff provider returns success")));
             }
         });
+    }
+
+    /// Collect changed files synchronously.
+    pub fn changed_files(&self, cwd: &Path) -> Result<Vec<FileChange>> {
+        for provider in &self.providers {
+            let changes = Mutex::new(Vec::new());
+            if provider
+                .for_each_changed_file(cwd, |change| {
+                    if let Ok(change) = change {
+                        changes.lock().unwrap().push(change);
+                    }
+                    true
+                })
+                .is_ok()
+            {
+                return Ok(changes.into_inner().unwrap());
+            }
+        }
+
+        bail!("no diff provider returns success")
     }
 }
 
