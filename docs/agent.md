@@ -91,7 +91,7 @@ The fork supports an experimental `[editor.agent]` table:
 ```toml
 [editor.agent]
 enable = true
-default-agent = "local"
+default-agent = "codex"
 auto-context-on-open = true
 include-theme = true
 include-command-history = true
@@ -99,13 +99,21 @@ include-visible-buffer = true
 include-diagnostics = true
 require-approval-for-shell = true
 
-[editor.agent.servers.local]
-command = "your-acp-agent"
+[editor.agent.servers.codex]
+command = "target/debug/helix-codex-agent"
 args = []
 ```
 
 The process-spawning layer resolves the configured `default-agent` from this table.
 Agent launch commands must speak ACP over stdio using `Content-Length` framed JSON-RPC. The local Codex CLI currently available in this environment does not expose a `codex acp` subcommand; configuring `codex acp` here will print Codex help and close stdout.
+
+For Codex, build the experimental adapter first:
+
+```sh
+cargo build -p helix-codex-agent
+```
+
+Then configure Helix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to Helix and forwards prompt turns to `codex exec` with the current Helix context included in stdin. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
 
 ## Near-Term Direction
 

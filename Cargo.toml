@@ -12,6 +12,7 @@ members = [
   "helix-dap",
   "helix-loader",
   "helix-vcs",
+  "helix-codex-agent",
   "helix-parsec",
   "helix-stdx",
   "xtask",
