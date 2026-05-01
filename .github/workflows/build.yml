@@ -1,12 +1,9 @@
 name: Build
 on:
-  pull_request:
   push:
     branches:
       - main
-  merge_group:
-  schedule:
-    - cron: "00 01 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
