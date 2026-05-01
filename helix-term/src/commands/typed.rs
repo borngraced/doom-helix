@@ -30,6 +30,7 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "explain",
     "fix",
     "refactor",
+    "restart",
     "restore",
     "next",
     "new",
@@ -631,6 +632,33 @@ fn start_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
         crate::agent::runtime::start(launch_config, handshake).await?;
         Ok(job::Callback::Editor(Box::new(move |editor| {
             editor.set_status(format!("Agent '{agent_name}' started"));
+        })))
+    });
+
+    Ok(())
+}
+
+fn restart_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
+    let launch_config = cx.editor.config().agent.launch_config()?;
+    let handshake = crate::agent::acp::session_handshake(cx.editor)?;
+    let agent_name = launch_config.name.clone();
+
+    crate::agent::runtime::cancel_all();
+    crate::agent::runtime::clear_latest_patch();
+    close_agent_patch_buffers(cx.editor);
+    let cancelled = cancel_agent_pending_turns(cx.editor);
+
+    cx.jobs.callback(async move {
+        let _ = crate::agent::runtime::stop().await?;
+        crate::agent::runtime::start(launch_config, handshake).await?;
+        Ok(job::Callback::Editor(Box::new(move |editor| {
+            if cancelled == 0 {
+                editor.set_status(format!("Agent '{agent_name}' restarted"));
+            } else {
+                editor.set_status(format!(
+                    "Agent '{agent_name}' restarted; cancelled {cancelled} pending turn(s)"
+                ));
+            }
         })))
     });
 
@@ -2206,6 +2234,7 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("acp") => open_agent_acp_handshake(cx),
         Some("launch-config") => open_agent_launch_config(cx),
         Some("start") => start_agent(cx),
+        Some("restart") => restart_agent(cx),
         Some("cancel") => {
             cancel_agent(cx);
             Ok(())

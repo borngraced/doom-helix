@@ -370,6 +370,7 @@ write_default_config() {
     printf '%s\n' '"+" = ":agent resize +5"'
     printf '%s\n' '"-" = ":agent resize -5"'
     printf '%s\n' 's = ":agent start"'
+    printf '%s\n' 'R = ":agent restart"'
     printf '%s\n' 'x = ":agent clear"'
     printf '%s\n' 'S = ":agent status"'
     printf '%s\n' ''

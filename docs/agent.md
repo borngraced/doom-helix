@@ -58,6 +58,11 @@ Opens the resolved default agent launch config from the active editor config.
 
 Starts the configured ACP agent and performs the session handshake.
 
+`:agent restart`
+
+Stops the current ACP agent if one is running, cancels pending transcript turns,
+and starts the configured agent again from the active config.
+
 `:agent status`
 
 Shows whether an agent is stopped, running, or busy. When running, the status
@@ -294,6 +299,7 @@ R = ":agent restore"
 "+" = ":agent resize +5"
 "-" = ":agent resize -5"
 s = ":agent start"
+R = ":agent restart"
 x = ":agent clear"
 S = ":agent status"
 

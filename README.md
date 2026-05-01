@@ -58,6 +58,7 @@ Common commands:
 :agent resize +5     # grow transcript panel
 :agent resize -5     # shrink transcript panel
 :agent status        # show agent runtime status
+:agent restart       # restart the configured ACP backend
 ```
 
 See [docs/agent.md](docs/agent.md) for the full command, configuration, and
