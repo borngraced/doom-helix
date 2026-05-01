@@ -647,8 +647,15 @@ fn prompt_agent(cx: &mut compositor::Context, prompt: String) {
 
 fn show_agent_status(cx: &mut compositor::Context) {
     match crate::agent::runtime::status() {
-        crate::agent::runtime::AgentRuntimeStatus::Running { name } => {
-            cx.editor.set_status(format!("Agent '{name}' is running"));
+        crate::agent::runtime::AgentRuntimeStatus::Running {
+            name,
+            session_id,
+            next_request_id,
+        } => {
+            let session = session_id.as_deref().unwrap_or("<pending>");
+            cx.editor.set_status(format!(
+                "Agent '{name}' is running, session {session}, next request #{next_request_id}"
+            ));
         }
         crate::agent::runtime::AgentRuntimeStatus::Stopped => {
             cx.editor.set_status("No agent is running");

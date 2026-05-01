@@ -98,6 +98,8 @@ pub fn status() -> AgentRuntimeStatus {
     match agent.as_ref() {
         Some(agent) => AgentRuntimeStatus::Running {
             name: agent.name.clone(),
+            session_id: agent.session_id.clone(),
+            next_request_id: agent.next_request_id,
         },
         None => AgentRuntimeStatus::Stopped,
     }
@@ -105,7 +107,11 @@ pub fn status() -> AgentRuntimeStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentRuntimeStatus {
-    Running { name: String },
+    Running {
+        name: String,
+        session_id: Option<String>,
+        next_request_id: u64,
+    },
     Stopped,
 }
 
