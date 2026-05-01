@@ -12,7 +12,7 @@ use super::{
 runtime_local! {
     static AGENT_RUNTIME: Mutex<Option<RunningAgent>> = Mutex::new(None);
     static AGENT_TRANSCRIPT: Mutex<Option<DocumentId>> = Mutex::new(None);
-    static AGENT_LATEST_PATCH: Mutex<Option<String>> = Mutex::new(None);
+    static AGENT_LATEST_PATCH: Mutex<Option<AgentPatchProposal>> = Mutex::new(None);
 }
 
 pub struct RunningAgent {
@@ -225,6 +225,14 @@ pub enum AgentRuntimeStatus {
     Stopped,
 }
 
+#[derive(Clone, Debug)]
+pub struct AgentPatchProposal {
+    pub patch: String,
+    pub cwd: String,
+    pub source_path: Option<String>,
+    pub request_id: u64,
+}
+
 pub fn transcript_doc_id() -> Option<DocumentId> {
     *AGENT_TRANSCRIPT
         .lock()
@@ -237,14 +245,14 @@ pub fn set_transcript_doc_id(doc_id: DocumentId) {
         .expect("agent transcript lock poisoned") = Some(doc_id);
 }
 
-pub fn latest_patch() -> Option<String> {
+pub fn latest_patch() -> Option<AgentPatchProposal> {
     AGENT_LATEST_PATCH
         .lock()
         .expect("agent latest patch lock poisoned")
         .clone()
 }
 
-pub fn set_latest_patch(patch: String) {
+pub fn set_latest_patch(patch: AgentPatchProposal) {
     *AGENT_LATEST_PATCH
         .lock()
         .expect("agent latest patch lock poisoned") = Some(patch);

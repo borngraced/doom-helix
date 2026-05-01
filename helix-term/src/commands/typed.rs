@@ -770,31 +770,31 @@ fn clear_agent_panel(cx: &mut compositor::Context) {
 }
 
 fn open_agent_patch(cx: &mut compositor::Context) -> anyhow::Result<()> {
-    let Some(patch) = crate::agent::runtime::latest_patch() else {
+    let Some(proposal) = crate::agent::runtime::latest_patch() else {
         cx.editor.set_error("No agent patch proposal is available");
         return Ok(());
     };
-    if !is_unified_diff(&patch) {
+    if !is_unified_diff(&proposal.patch) {
         cx.editor
             .set_error("Latest agent response is not an applicable patch");
         return Ok(());
     }
 
-    open_agent_named_scratch_editor(cx.editor, patch, "diff", "[agent patch]", true)
+    open_agent_named_scratch_editor(cx.editor, proposal.patch, "diff", "[agent patch]", true)
 }
 
 fn apply_agent_patch(cx: &mut compositor::Context) {
-    let Some(patch) = crate::agent::runtime::latest_patch() else {
+    let Some(proposal) = crate::agent::runtime::latest_patch() else {
         cx.editor.set_error("No agent patch proposal is available");
         return;
     };
-    if !is_unified_diff(&patch) {
+    if !is_unified_diff(&proposal.patch) {
         cx.editor
             .set_error("Latest agent response is not an applicable patch");
         return;
     }
-    let apply_cwd =
-        PathBuf::from(crate::agent::context::current_snapshot(cx.editor).workspace_root);
+    let apply_cwd = PathBuf::from(proposal.cwd.clone());
+    let patch = proposal.patch.clone();
 
     cx.jobs.callback(async move {
         Ok(job::Callback::EditorCompositor(Box::new(
@@ -1120,11 +1120,18 @@ fn prompt_agent_turn(
     let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
     let launch_config = cx.editor.config().agent.launch_config()?;
     let handshake = crate::agent::acp::session_handshake(cx.editor)?;
+    let snapshot = crate::agent::context::current_snapshot(cx.editor);
+    let patch_cwd = snapshot.workspace_root.clone();
+    let patch_source_path = snapshot.active_file.path.clone();
     let meta = serde_json::json!({
         "helix": {
-            "context": crate::agent::context::current_snapshot(cx.editor),
+            "context": snapshot,
         }
     });
+    if !store_patch {
+        crate::agent::runtime::clear_latest_patch();
+        close_agent_patch_buffers(cx.editor);
+    }
     cx.editor.set_status("Agent is thinking...");
     let pending_range = append_agent_pending_transcript_editor(cx.editor, &prompt)?;
 
@@ -1140,7 +1147,14 @@ fn prompt_agent_turn(
         let contents = agent_turn_response_markdown(&turn)?;
         let patch_stored = if store_patch {
             if let Some(patch) = extract_agent_patch(&contents) {
-                crate::agent::runtime::set_latest_patch(patch);
+                crate::agent::runtime::set_latest_patch(
+                    crate::agent::runtime::AgentPatchProposal {
+                        patch,
+                        cwd: patch_cwd,
+                        source_path: patch_source_path,
+                        request_id: turn.request_id,
+                    },
+                );
                 true
             } else {
                 crate::agent::runtime::clear_latest_patch();
