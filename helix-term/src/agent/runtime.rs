@@ -12,6 +12,7 @@ use super::{
 
 runtime_local! {
     static AGENT_RUNTIME: Mutex<Option<RunningAgent>> = Mutex::new(None);
+    static AGENT_BUSY: Mutex<Option<AgentBusyStatus>> = Mutex::new(None);
     static AGENT_TRANSCRIPT: Mutex<Option<DocumentId>> = Mutex::new(None);
     static AGENT_LATEST_PATCH: Mutex<Option<AgentPatchProposal>> = Mutex::new(None);
     static AGENT_TRANSCRIPT_TURNS: Mutex<Vec<AgentTranscriptTurn>> = Mutex::new(Vec::new());
@@ -26,18 +27,46 @@ pub struct RunningAgent {
     pub next_request_id: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentBusyStatus {
+    pub name: String,
+    pub session_id: Option<String>,
+    pub request_id: Option<u64>,
+}
+
+struct AgentBusyGuard;
+
+impl Drop for AgentBusyGuard {
+    fn drop(&mut self) {
+        clear_busy_agent();
+    }
+}
+
 pub async fn start(
     launch_config: AgentLaunchConfig,
     handshake: Vec<JsonRpcRequest>,
 ) -> anyhow::Result<()> {
+    let _busy_guard = set_busy_agent(AgentBusyStatus {
+        name: launch_config.name.clone(),
+        session_id: None,
+        request_id: None,
+    });
+
     if let Some(mut running) = take_running_agent() {
+        log::info!("stopping existing agent '{}' before restart", running.name);
         running.process.kill().await?;
     }
 
+    log::info!(
+        "starting agent '{}' using {:?}",
+        launch_config.name,
+        launch_config.transport
+    );
     let mut process = AgentProcess::spawn(&launch_config).await?;
     for message in handshake {
         process.send(&message).await?;
     }
+    log::info!("agent '{}' handshake sent", launch_config.name);
 
     let mut agent = AGENT_RUNTIME.lock().expect("agent runtime lock poisoned");
     *agent = Some(RunningAgent {
@@ -71,6 +100,7 @@ pub async fn stop() -> anyhow::Result<Option<String>> {
         return Ok(None);
     };
 
+    log::info!("stopping agent '{}'", running.name);
     running.process.kill().await?;
     Ok(Some(running.name))
 }
@@ -133,11 +163,17 @@ where
     let Some(mut running) = take_running_agent() else {
         anyhow::bail!("no agent is running");
     };
+    let _busy_guard = set_busy_agent(AgentBusyStatus {
+        name: running.name.clone(),
+        session_id: running.session_id.clone(),
+        request_id: None,
+    });
 
     let mut messages = Vec::new();
     while running.session_id.is_none() {
         let message = recv_running_message(&mut running).await?;
         update_session_id(&mut running, &message);
+        update_busy_agent_session(running.session_id.clone());
         messages.push(message);
     }
 
@@ -147,7 +183,13 @@ where
         .expect("session id checked before prompt send");
     let request_id = running.next_request_id;
     running.next_request_id += 1;
+    update_busy_agent_request(request_id);
     let turn_prompt = prompt.clone();
+    log::info!(
+        "sending agent prompt request {request_id} to '{}' session {}",
+        running.name,
+        session_id
+    );
     let request = super::acp::prompt_request(request_id, session_id, prompt, meta)?;
     running.process.send(&request).await?;
 
@@ -159,6 +201,10 @@ where
         on_message(&message);
         messages.push(message);
         if turn_done {
+            log::info!(
+                "agent prompt request {request_id} completed with {} messages",
+                messages.len()
+            );
             restore_running_agent(running);
             return Ok(AgentTurn {
                 request_id,
@@ -186,6 +232,10 @@ pub async fn send_prompt(prompt: String, meta: Option<Value>) -> anyhow::Result<
     let request_id = running.next_request_id;
     running.next_request_id += 1;
     let request = super::acp::prompt_request(request_id, session_id, prompt, meta)?;
+    log::info!(
+        "sending detached agent prompt request {request_id} to '{}'",
+        running.name
+    );
     let send_result = running.process.send(&request).await;
     restore_running_agent(running);
     send_result?;
@@ -239,8 +289,41 @@ pub fn status() -> AgentRuntimeStatus {
             session_id: agent.session_id.clone(),
             next_request_id: agent.next_request_id,
         },
-        None => AgentRuntimeStatus::Stopped,
+        None => AGENT_BUSY
+            .lock()
+            .expect("agent busy lock poisoned")
+            .clone()
+            .map_or(AgentRuntimeStatus::Stopped, AgentRuntimeStatus::Busy),
     }
+}
+
+fn set_busy_agent(status: AgentBusyStatus) -> AgentBusyGuard {
+    *AGENT_BUSY.lock().expect("agent busy lock poisoned") = Some(status);
+    AgentBusyGuard
+}
+
+fn update_busy_agent_session(session_id: Option<String>) {
+    if let Some(status) = AGENT_BUSY
+        .lock()
+        .expect("agent busy lock poisoned")
+        .as_mut()
+    {
+        status.session_id = session_id;
+    }
+}
+
+fn update_busy_agent_request(request_id: u64) {
+    if let Some(status) = AGENT_BUSY
+        .lock()
+        .expect("agent busy lock poisoned")
+        .as_mut()
+    {
+        status.request_id = Some(request_id);
+    }
+}
+
+fn clear_busy_agent() {
+    *AGENT_BUSY.lock().expect("agent busy lock poisoned") = None;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -250,6 +333,7 @@ pub enum AgentRuntimeStatus {
         session_id: Option<String>,
         next_request_id: u64,
     },
+    Busy(AgentBusyStatus),
     Stopped,
 }
 

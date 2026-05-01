@@ -1385,6 +1385,17 @@ fn agent_status_message() -> String {
             let session = session_id.as_deref().unwrap_or("<pending>");
             format!("Agent '{name}' is running, session {session}, next request #{next_request_id}")
         }
+        crate::agent::runtime::AgentRuntimeStatus::Busy(status) => {
+            let session = status.session_id.as_deref().unwrap_or("<pending>");
+            let request = status
+                .request_id
+                .map(|request_id| format!(", request #{request_id}"))
+                .unwrap_or_default();
+            format!(
+                "Agent '{}' is busy, session {session}{request}",
+                status.name
+            )
+        }
         crate::agent::runtime::AgentRuntimeStatus::Stopped => "No agent is running".to_string(),
     }
 }
@@ -5406,7 +5417,7 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
     TypableCommand {
         name: "log-open",
         aliases: &[],
-        doc: "Open the helix log file.",
+        doc: "Open the DoomHelix log file.",
         fun: open_log,
         completer: CommandCompleter::none(),
         signature: Signature {

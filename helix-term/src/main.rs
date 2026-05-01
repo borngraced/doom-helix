@@ -8,8 +8,7 @@ fn setup_logging(verbosity: u64) -> Result<()> {
     let mut base_config = fern::Dispatch::new();
 
     base_config = match verbosity {
-        0 => base_config.level(log::LevelFilter::Warn),
-        1 => base_config.level(log::LevelFilter::Info),
+        0 | 1 => base_config.level(log::LevelFilter::Info),
         2 => base_config.level(log::LevelFilter::Debug),
         _3_or_more => base_config.level(log::LevelFilter::Trace),
     };
@@ -53,7 +52,7 @@ async fn main_impl() -> Result<i32> {
 {}
 
 USAGE:
-    hx [FLAGS] [files]...
+    dhx [FLAGS] [files]...
 
 ARGS:
     <files>...    Set the input file to use, position can also be specified via file[:row[:col]]
@@ -88,7 +87,7 @@ FLAGS:
     }
 
     if args.display_version {
-        println!("helix {}", VERSION_AND_GIT_HASH);
+        println!("DoomHelix {}", VERSION_AND_GIT_HASH);
         std::process::exit(0);
     }
 
@@ -115,6 +114,7 @@ FLAGS:
     }
 
     setup_logging(args.verbosity).context("failed to initialize logging")?;
+    log::info!("DoomHelix started {}", VERSION_AND_GIT_HASH);
 
     // NOTE: Set the working directory early so the correct configuration is loaded. Be aware that
     // Application::new() depends on this logic so it must be updated if this changes.

@@ -45,9 +45,11 @@ fn run_websocket_server(addr: &str) -> Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                if let Err(err) = handle_websocket_client(stream) {
-                    eprintln!("helix-codex-agent websocket client error: {err:#}");
-                }
+                thread::spawn(move || {
+                    if let Err(err) = handle_websocket_client(stream) {
+                        eprintln!("helix-codex-agent websocket client error: {err:#}");
+                    }
+                });
             }
             Err(err) => eprintln!("helix-codex-agent websocket accept error: {err}"),
         }

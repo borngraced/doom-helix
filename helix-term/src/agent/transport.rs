@@ -171,6 +171,13 @@ impl StdioAgentProcess {
 
 impl WebSocketAgentProcess {
     async fn connect(config: &AgentLaunchConfig) -> anyhow::Result<Self> {
+        if let Ok(stream) = Self::connect_once(&config.url).await {
+            return Ok(Self {
+                stream,
+                child: None,
+            });
+        }
+
         let child = if config.command.trim().is_empty() {
             None
         } else {
@@ -189,15 +196,22 @@ impl WebSocketAgentProcess {
             .then(|| Instant::now() + Duration::from_secs(2));
 
         loop {
-            match connect_async(config.url.as_str()).await {
-                Ok((stream, _)) => return Ok(Self { stream, child }),
+            match Self::connect_once(&config.url).await {
+                Ok(stream) => return Ok(Self { stream, child }),
                 Err(err) if retry_until.is_some_and(|deadline| Instant::now() < deadline) => {
                     sleep(Duration::from_millis(50)).await;
                     let _ = err;
                 }
-                Err(err) => return Err(err.into()),
+                Err(err) => return Err(err),
             }
         }
+    }
+
+    async fn connect_once(
+        url: &str,
+    ) -> anyhow::Result<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>> {
+        let (stream, _) = timeout(Duration::from_millis(500), connect_async(url)).await??;
+        Ok(stream)
     }
 
     async fn send<T: Serialize>(&mut self, message: &T) -> anyhow::Result<()> {

@@ -93,28 +93,6 @@ fn rendered_agent_markdown_scroll(
     scroll
 }
 
-fn rendered_agent_markdown_position(
-    doc: &Document,
-    anchor: usize,
-    editor: &Editor,
-    viewport_width: u16,
-) -> Position {
-    let prefix = doc
-        .text()
-        .slice(..anchor.min(doc.text().len_chars()))
-        .to_string();
-    let markdown = crate::ui::Markdown::new(prefix, editor.syn_loader.clone());
-    let text = markdown.parse(None);
-    let row = text.lines.len().saturating_sub(1);
-    let col = text.lines.last().map(Spans::width).unwrap_or_default();
-    let width = usize::from(viewport_width.max(1));
-
-    Position {
-        row: row + (col / width),
-        col: col % width,
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum InsertEvent {
     Key(KeyEvent),
@@ -160,7 +138,7 @@ impl EditorView {
 
         let view_offset = doc.view_offset(view.id);
 
-        if Self::is_agent_transcript_doc(doc) {
+        if Self::is_agent_transcript_doc(doc) && editor.mode() != Mode::Select {
             self.render_agent_transcript_markdown(editor, doc, view, surface);
             self.render_view_border_and_statusline(
                 editor, doc, view, viewport, surface, is_focused,
@@ -380,69 +358,6 @@ impl EditorView {
             .scroll((scroll, 0));
 
         paragraph.render(viewport, surface);
-        Self::render_agent_transcript_selection(editor, doc, view, viewport, surface, scroll);
-    }
-
-    fn render_agent_transcript_selection(
-        editor: &Editor,
-        doc: &Document,
-        view: &View,
-        viewport: Rect,
-        surface: &mut Surface,
-        scroll: u16,
-    ) {
-        let selection = doc.selection(view.id);
-        if selection.iter().all(|range| range.anchor == range.head) {
-            return;
-        }
-
-        let selection_style = editor.theme.get("ui.selection.primary");
-        let visible_start = usize::from(scroll);
-        let visible_end = visible_start + usize::from(viewport.height);
-
-        for range in selection.iter() {
-            if range.anchor == range.head {
-                continue;
-            }
-
-            let start = rendered_agent_markdown_position(doc, range.from(), editor, viewport.width);
-            let end = rendered_agent_markdown_position(doc, range.to(), editor, viewport.width);
-            if end.row < visible_start || start.row >= visible_end {
-                continue;
-            }
-
-            let start_row = start.row.saturating_sub(visible_start);
-            let end_row = end.row.saturating_sub(visible_start);
-            for row in start_row..=end_row {
-                if row >= usize::from(viewport.height) {
-                    break;
-                }
-
-                let start_col = if row == start_row { start.col } else { 0 };
-                let end_col = if row == end_row {
-                    end.col.max(start_col + 1)
-                } else {
-                    usize::from(viewport.width)
-                };
-                if start_col >= usize::from(viewport.width) {
-                    continue;
-                }
-
-                let width = end_col
-                    .min(usize::from(viewport.width))
-                    .saturating_sub(start_col)
-                    .max(1);
-                surface.set_style(
-                    Rect::new(
-                        viewport.x + start_col as u16,
-                        viewport.y + row as u16,
-                        width as u16,
-                        1,
-                    ),
-                    selection_style,
-                );
-            }
-        }
     }
 
     pub fn render_rulers(
