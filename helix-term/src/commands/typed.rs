@@ -731,14 +731,17 @@ fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Re
         }
     });
     cx.editor.set_status("Agent is thinking...");
+    let pending_range = append_agent_pending_transcript_editor(cx.editor, &prompt)?;
 
     cx.jobs.callback(async move {
         helix_event::status::report("Agent request sent to Codex...").await;
         let turn = crate::agent::runtime::send_prompt_turn(prompt, Some(meta)).await?;
-        let contents = agent_turn_markdown(&turn)?;
+        let contents = agent_turn_response_markdown(&turn)?;
         let request_id = turn.request_id;
         Ok(job::Callback::Editor(Box::new(move |editor| {
-            if let Err(err) = append_agent_transcript_editor(editor, contents) {
+            if let Err(err) =
+                replace_agent_pending_transcript_editor(editor, pending_range, contents)
+            {
                 editor.set_error(err.to_string());
             } else {
                 editor.set_status(format!("Agent turn #{request_id} complete"));
@@ -776,7 +779,70 @@ fn open_agent_json_scratch_editor(editor: &mut Editor, contents: String) -> anyh
     open_agent_scratch_editor(editor, contents, "json")
 }
 
-fn append_agent_transcript_editor(editor: &mut Editor, contents: String) -> anyhow::Result<()> {
+#[derive(Debug, Clone, Copy)]
+struct AgentPendingRange {
+    doc_id: helix_view::DocumentId,
+    response_start: usize,
+    response_end: usize,
+}
+
+fn append_agent_pending_transcript_editor(
+    editor: &mut Editor,
+    prompt: &str,
+) -> anyhow::Result<AgentPendingRange> {
+    let doc_id = agent_transcript_doc_id(editor);
+    let view_id = prepare_agent_transcript_doc(editor, doc_id);
+    let loader = editor.syn_loader.load();
+    let doc = doc_mut!(editor, &doc_id);
+
+    let prefix = if doc.text().len_chars() == 0 {
+        String::new()
+    } else {
+        "\n\n---\n\n".to_string()
+    };
+    let pending = "Working...";
+    let header = format!("{prefix}**You:**\n\n{}\n\n**Codex:**\n\n", prompt.trim());
+    let response_start = doc.text().len_chars() + header.chars().count();
+    let response_end = response_start + pending.chars().count();
+    let insertion = format!("{header}{pending}\n");
+
+    insert_agent_transcript_text(doc, view_id, insertion);
+    doc.set_language_by_language_id("markdown", &loader).ok();
+
+    Ok(AgentPendingRange {
+        doc_id,
+        response_start,
+        response_end,
+    })
+}
+
+fn replace_agent_pending_transcript_editor(
+    editor: &mut Editor,
+    pending_range: AgentPendingRange,
+    contents: String,
+) -> anyhow::Result<()> {
+    if editor.document(pending_range.doc_id).is_none() {
+        let _ = append_agent_pending_transcript_editor(editor, "(original prompt unavailable)")?;
+    }
+
+    let view_id = prepare_agent_transcript_doc(editor, pending_range.doc_id);
+    let doc = doc_mut!(editor, &pending_range.doc_id);
+    let replacement = format!("{}\n", contents.trim());
+    let transaction = Transaction::change(
+        doc.text(),
+        [(
+            pending_range.response_start,
+            pending_range.response_end,
+            Some(replacement.into()),
+        )]
+        .into_iter(),
+    );
+    doc.apply(&transaction, view_id);
+
+    Ok(())
+}
+
+fn agent_transcript_doc_id(editor: &mut Editor) -> helix_view::DocumentId {
     let doc_id = crate::agent::runtime::transcript_doc_id()
         .filter(|doc_id| editor.document(*doc_id).is_some())
         .unwrap_or_else(|| {
@@ -784,26 +850,29 @@ fn append_agent_transcript_editor(editor: &mut Editor, contents: String) -> anyh
             crate::agent::runtime::set_transcript_doc_id(doc_id);
             doc_id
         });
+    doc_id
+}
 
+fn prepare_agent_transcript_doc(
+    editor: &mut Editor,
+    doc_id: helix_view::DocumentId,
+) -> helix_view::ViewId {
     editor.switch(doc_id, Action::Replace);
     let view_id = view!(editor).id;
-    let loader = editor.syn_loader.load();
     let doc = doc_mut!(editor, &doc_id);
     doc.ensure_view_init(view_id);
+    view_id
+}
 
-    let prefix = if doc.text().len_chars() == 0 {
-        String::new()
-    } else {
-        "\n\n---\n\n".to_string()
-    };
-    let insertion = format!("{prefix}{contents}");
+fn insert_agent_transcript_text(
+    doc: &mut helix_view::Document,
+    view_id: helix_view::ViewId,
+    insertion: String,
+) {
     let insert_at = doc.text().len_chars();
     let selection = Selection::point(insert_at);
     let transaction = Transaction::insert(doc.text(), &selection, insertion.into());
     doc.apply(&transaction, view_id);
-    doc.set_language_by_language_id("markdown", &loader).ok();
-
-    Ok(())
 }
 
 fn open_agent_scratch_editor(
@@ -824,7 +893,7 @@ fn open_agent_scratch_editor(
     Ok(())
 }
 
-fn agent_turn_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyhow::Result<String> {
+fn agent_turn_response_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyhow::Result<String> {
     let mut response = String::new();
 
     for message in &turn.messages {
@@ -869,11 +938,7 @@ fn agent_turn_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyhow::Resul
         return Ok(serde_json::to_string_pretty(turn)?);
     }
 
-    Ok(format!(
-        "**You:**\n\n{}\n\n**Codex:**\n\n{}\n",
-        turn.prompt.trim(),
-        response.trim()
-    ))
+    Ok(response.trim().to_string())
 }
 
 fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {

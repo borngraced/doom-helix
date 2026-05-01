@@ -119,6 +119,8 @@ pub async fn send_prompt_turn(prompt: String, meta: Option<Value>) -> anyhow::Re
             return Ok(AgentTurn {
                 request_id,
                 prompt: turn_prompt,
+                pending_start: None,
+                pending_end: None,
                 messages,
             });
         }
@@ -150,6 +152,8 @@ pub async fn send_prompt(prompt: String, meta: Option<Value>) -> anyhow::Result<
 pub struct AgentTurn {
     pub request_id: u64,
     pub prompt: String,
+    pub pending_start: Option<usize>,
+    pub pending_end: Option<usize>,
     pub messages: Vec<JsonRpcMessage>,
 }
 
