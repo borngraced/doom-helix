@@ -3,6 +3,7 @@ use helix_view::Editor;
 use serde::Serialize;
 
 const MAX_SELECTION_TEXT_CHARS: usize = 2_000;
+const MAX_RECENT_COMMANDS: usize = 20;
 
 #[derive(Debug, Serialize)]
 pub struct EditorSnapshot {
@@ -152,6 +153,17 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         })
         .collect();
 
+    let recent_commands = editor
+        .registers
+        .read(':', editor)
+        .map(|commands| {
+            commands
+                .take(MAX_RECENT_COMMANDS)
+                .map(|command| format!(":{command}"))
+                .collect()
+        })
+        .unwrap_or_default();
+
     EditorSnapshot {
         workspace_root: workspace_root.display().to_string(),
         cwd: cwd.display().to_string(),
@@ -180,7 +192,7 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         selections,
         open_buffers,
         diagnostics,
-        recent_commands: Vec::new(),
+        recent_commands,
     }
 }
 
