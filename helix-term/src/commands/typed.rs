@@ -1171,60 +1171,81 @@ fn prompt_agent_turn(
     let pending_range = append_agent_pending_transcript_editor(cx.editor, &prompt)?;
 
     cx.jobs.callback(async move {
-        let started = crate::agent::runtime::ensure_started(launch_config, handshake).await?;
-        let status = if started {
-            "Agent started; request sent to Codex..."
-        } else {
-            "Agent request sent to Codex..."
-        };
-        helix_event::status::report(status).await;
-        let turn = crate::agent::runtime::send_prompt_turn(prompt, Some(meta)).await?;
-        if crate::agent::runtime::is_cancelled(cancel_generation) {
-            let _ = crate::agent::runtime::stop().await;
-            return Ok(job::Callback::Editor(Box::new(|editor| {
-                editor.set_status("Ignored cancelled agent response");
-            })));
-        }
-        let contents = agent_turn_response_markdown(&turn)?;
-        let patch_stored = if store_patch {
-            if let Some(patch) = extract_agent_patch(&contents) {
-                crate::agent::runtime::set_latest_patch(
-                    crate::agent::runtime::AgentPatchProposal {
-                        patch,
-                        cwd: patch_cwd,
-                        source_path: patch_source_path,
-                        request_id: turn.request_id,
-                    },
-                );
-                true
+        let result = async {
+            let started = crate::agent::runtime::ensure_started(launch_config, handshake).await?;
+            let status = if started {
+                "Agent started; request sent to Codex..."
             } else {
-                crate::agent::runtime::clear_latest_patch();
+                "Agent request sent to Codex..."
+            };
+            helix_event::status::report(status).await;
+            let turn = crate::agent::runtime::send_prompt_turn(prompt, Some(meta)).await?;
+            if crate::agent::runtime::is_cancelled(cancel_generation) {
+                let _ = crate::agent::runtime::stop().await;
+                return Ok(None);
+            }
+            let contents = agent_turn_response_markdown(&turn)?;
+            let patch_stored = if store_patch {
+                if let Some(patch) = extract_agent_patch(&contents) {
+                    crate::agent::runtime::set_latest_patch(
+                        crate::agent::runtime::AgentPatchProposal {
+                            patch,
+                            cwd: patch_cwd,
+                            source_path: patch_source_path,
+                            request_id: turn.request_id,
+                        },
+                    );
+                    true
+                } else {
+                    crate::agent::runtime::clear_latest_patch();
+                    false
+                }
+            } else {
                 false
-            }
-        } else {
-            false
-        };
-        let status_suffix = if store_patch && !patch_stored {
-            "; no applicable patch found"
-        } else {
-            ""
-        };
-        let status = format!("Agent turn #{}{status_suffix}", turn.request_id);
-        let status = if status_suffix.is_empty() {
-            format!("{status} complete")
-        } else {
-            status
-        }
-        .to_string();
-        Ok(job::Callback::Editor(Box::new(move |editor| {
-            if let Err(err) =
-                replace_agent_pending_transcript_editor(editor, pending_range, contents)
-            {
-                editor.set_error(err.to_string());
+            };
+            let status_suffix = if store_patch && !patch_stored {
+                "; no applicable patch found"
             } else {
-                editor.set_status(status);
+                ""
+            };
+            let status = format!("Agent turn #{}{status_suffix}", turn.request_id);
+            let status = if status_suffix.is_empty() {
+                format!("{status} complete")
+            } else {
+                status
             }
-        })))
+            .to_string();
+            anyhow::Ok(Some((contents, status)))
+        }
+        .await;
+
+        Ok(job::Callback::Editor(Box::new(
+            move |editor| match result {
+                Ok(Some((contents, status))) => {
+                    if let Err(err) =
+                        replace_agent_pending_transcript_editor(editor, pending_range, contents)
+                    {
+                        editor.set_error(err.to_string());
+                    } else {
+                        editor.set_status(status);
+                    }
+                }
+                Ok(None) => {
+                    editor.set_status("Ignored cancelled agent response");
+                }
+                Err(err) => {
+                    crate::agent::runtime::clear_latest_patch();
+                    let message = format!("Agent turn failed:\n\n```text\n{err:#}\n```");
+                    if let Err(render_err) =
+                        fail_agent_pending_transcript_editor(editor, pending_range, message)
+                    {
+                        editor.set_error(render_err.to_string());
+                    } else {
+                        editor.set_error("Agent turn failed");
+                    }
+                }
+            },
+        )))
     });
 
     Ok(())
@@ -1296,6 +1317,30 @@ fn replace_agent_pending_transcript_editor(
     let action = agent_panel_action(position);
     let view_id = prepare_agent_transcript_doc(editor, pending_turn.doc_id, action);
     crate::agent::runtime::complete_transcript_turn(pending_turn.id, contents.trim().to_string());
+    render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
+    let doc = doc_mut!(editor, &pending_turn.doc_id);
+    let cursor = doc.text().len_chars();
+    doc.set_selection(view_id, Selection::point(cursor));
+    let scrolloff = editor.config().scrolloff;
+    let (view, doc) = current!(editor);
+    view.ensure_cursor_in_view(doc, scrolloff);
+
+    Ok(())
+}
+
+fn fail_agent_pending_transcript_editor(
+    editor: &mut Editor,
+    pending_turn: AgentPendingTurn,
+    contents: String,
+) -> anyhow::Result<()> {
+    if editor.document(pending_turn.doc_id).is_none() {
+        return Ok(());
+    }
+
+    let position = editor.config().agent.panel_position;
+    let action = agent_panel_action(position);
+    let view_id = prepare_agent_transcript_doc(editor, pending_turn.doc_id, action);
+    crate::agent::runtime::fail_transcript_turn(pending_turn.id, contents);
     render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
     let doc = doc_mut!(editor, &pending_turn.doc_id);
     let cursor = doc.text().len_chars();
