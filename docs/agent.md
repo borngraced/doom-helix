@@ -66,6 +66,11 @@ Starts the configured agent first if needed.
 Asks Codex to suggest a clean refactor for the current primary selection without editing files.
 Starts the configured agent first if needed.
 
+`:agent panel`
+
+Opens or focuses the agent transcript buffer. The split direction follows `[editor.agent].panel-position`.
+There is one agent transcript per running agent runtime; new chat/action turns append to that transcript.
+
 `:agent-context`
 
 Compatibility command that opens the same context snapshot directly.
@@ -111,6 +116,8 @@ The fork supports an experimental `[editor.agent]` table:
 [editor.agent]
 enable = true
 default-agent = "codex"
+panel-position = "right"
+panel-size = 30
 auto-context-on-open = true
 include-theme = true
 include-command-history = true
@@ -125,6 +132,8 @@ args = []
 
 The process-spawning layer resolves the configured `default-agent` from this table.
 Agent launch commands must speak ACP over stdio using `Content-Length` framed JSON-RPC. The local Codex CLI currently available in this environment does not expose a `codex acp` subcommand; configuring `codex acp` here will print Codex help and close stdout.
+
+`panel-position` controls where a new agent transcript split opens. Supported values are `left`, `right`, `top`, and `bottom`. `panel-size` is stored as a percentage for the intended panel size; the current split implementation opens an equal-sized split, and exact percentage sizing is reserved for a later weighted-split pass.
 
 For Codex, build the experimental adapter first:
 
@@ -146,6 +155,7 @@ c = ":agent chat"
 e = ":agent explain"
 f = ":agent fix"
 r = ":agent refactor"
+p = ":agent panel"
 s = ":agent start"
 S = ":agent status"
 

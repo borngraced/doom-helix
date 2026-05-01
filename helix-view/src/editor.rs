@@ -442,6 +442,8 @@ pub struct Config {
 pub struct AgentConfig {
     pub enable: bool,
     pub default_agent: String,
+    pub panel_position: AgentPanelPosition,
+    pub panel_size: u16,
     pub auto_context_on_open: bool,
     pub include_theme: bool,
     pub include_command_history: bool,
@@ -449,6 +451,16 @@ pub struct AgentConfig {
     pub include_diagnostics: bool,
     pub require_approval_for_shell: bool,
     pub servers: BTreeMap<String, AgentServerConfig>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentPanelPosition {
+    #[default]
+    Right,
+    Left,
+    Top,
+    Bottom,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -492,6 +504,8 @@ impl Default for AgentConfig {
         Self {
             enable: false,
             default_agent: "codex".to_string(),
+            panel_position: AgentPanelPosition::Right,
+            panel_size: 30,
             auto_context_on_open: true,
             include_theme: true,
             include_command_history: true,
@@ -2597,6 +2611,8 @@ mod agent_config_tests {
             r#"
             enable = true
             default-agent = "local"
+            panel-position = "bottom"
+            panel-size = 40
 
             [servers.local]
             command = "agent"
@@ -2607,6 +2623,8 @@ mod agent_config_tests {
 
         assert!(config.enable);
         assert_eq!(config.default_agent, "local");
+        assert_eq!(config.panel_position, AgentPanelPosition::Bottom);
+        assert_eq!(config.panel_size, 40);
         assert_eq!(config.servers["local"].command, "agent");
         assert_eq!(config.servers["local"].args, ["--acp"]);
     }

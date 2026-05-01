@@ -12,7 +12,7 @@ use helix_core::indent::MAX_INDENT;
 use helix_core::line_ending;
 use helix_stdx::path::home_dir;
 use helix_view::document::{read_to_string, DEFAULT_LANGUAGE_NAME};
-use helix_view::editor::{CloseError, ConfigEvent};
+use helix_view::editor::{AgentPanelPosition, CloseError, ConfigEvent};
 use helix_view::expansion;
 use serde_json::Value;
 use ui::completers::{self, Completer};
@@ -27,6 +27,7 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "new",
     "acp",
     "launch-config",
+    "panel",
     "start",
     "status",
     "stop",
@@ -723,6 +724,34 @@ fn refactor_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
     )
 }
 
+fn open_agent_panel(cx: &mut compositor::Context) {
+    let position = cx.editor.config().agent.panel_position;
+    let action = agent_panel_action(position);
+    let (doc_id, created) = agent_transcript_doc_id(cx.editor, action);
+    prepare_agent_transcript_doc(cx.editor, doc_id);
+    if created {
+        place_agent_panel(cx.editor, position);
+    }
+    cx.editor.set_status("Agent panel focused");
+}
+
+fn agent_panel_action(position: AgentPanelPosition) -> Action {
+    match position {
+        AgentPanelPosition::Left | AgentPanelPosition::Right => Action::VerticalSplit,
+        AgentPanelPosition::Top | AgentPanelPosition::Bottom => Action::HorizontalSplit,
+    }
+}
+
+fn place_agent_panel(editor: &mut Editor, position: AgentPanelPosition) {
+    match position {
+        AgentPanelPosition::Left => {
+            editor.swap_split_in_direction(helix_view::tree::Direction::Left)
+        }
+        AgentPanelPosition::Top => editor.swap_split_in_direction(helix_view::tree::Direction::Up),
+        AgentPanelPosition::Right | AgentPanelPosition::Bottom => {}
+    }
+}
+
 fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Result<()> {
     let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
     let launch_config = cx.editor.config().agent.launch_config()?;
@@ -798,8 +827,13 @@ fn append_agent_pending_transcript_editor(
     editor: &mut Editor,
     prompt: &str,
 ) -> anyhow::Result<AgentPendingRange> {
-    let doc_id = agent_transcript_doc_id(editor);
+    let position = editor.config().agent.panel_position;
+    let action = agent_panel_action(position);
+    let (doc_id, created) = agent_transcript_doc_id(editor, action);
     let view_id = prepare_agent_transcript_doc(editor, doc_id);
+    if created {
+        place_agent_panel(editor, position);
+    }
     let loader = editor.syn_loader.load();
     let doc = doc_mut!(editor, &doc_id);
 
@@ -854,15 +888,16 @@ fn replace_agent_pending_transcript_editor(
     Ok(())
 }
 
-fn agent_transcript_doc_id(editor: &mut Editor) -> helix_view::DocumentId {
-    let doc_id = crate::agent::runtime::transcript_doc_id()
+fn agent_transcript_doc_id(editor: &mut Editor, action: Action) -> (helix_view::DocumentId, bool) {
+    if let Some(doc_id) = crate::agent::runtime::transcript_doc_id()
         .filter(|doc_id| editor.document(*doc_id).is_some())
-        .unwrap_or_else(|| {
-            let doc_id = editor.new_file(Action::HorizontalSplit);
-            crate::agent::runtime::set_transcript_doc_id(doc_id);
-            doc_id
-        });
-    doc_id
+    {
+        return (doc_id, false);
+    }
+
+    let doc_id = editor.new_file(action);
+    crate::agent::runtime::set_transcript_doc_id(doc_id);
+    (doc_id, true)
 }
 
 fn prepare_agent_transcript_doc(
@@ -987,6 +1022,10 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("explain") => explain_agent(cx),
         Some("fix") => fix_agent(cx),
         Some("refactor") => refactor_agent(cx),
+        Some("panel") => {
+            open_agent_panel(cx);
+            Ok(())
+        }
         Some("status") => {
             show_agent_status(cx);
             Ok(())
