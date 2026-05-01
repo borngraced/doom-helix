@@ -118,37 +118,6 @@ pub fn is_cancelled(generation: u64) -> bool {
     cancel_generation() != generation
 }
 
-pub async fn recv_next() -> anyhow::Result<JsonRpcMessage> {
-    let Some(mut running) = take_running_agent() else {
-        anyhow::bail!("no agent is running");
-    };
-
-    match running.process.recv().await {
-        Ok(message) => {
-            update_session_id(&mut running, &message);
-            restore_running_agent(running);
-            Ok(message)
-        }
-        Err(err) => {
-            let exit_status = running.process.try_wait()?;
-            let stderr = running.process.stderr_snapshot().await?;
-            if exit_status.is_none() {
-                restore_running_agent(running);
-            }
-
-            let mut message = format!("failed to read agent message: {err}");
-            if let Some(status) = exit_status {
-                message.push_str(&format!("; process exited with {status}"));
-            }
-            if let Some(stderr) = stderr {
-                message.push_str(&format!("; stderr: {stderr}"));
-            }
-
-            anyhow::bail!(message);
-        }
-    }
-}
-
 pub async fn send_prompt_turn(prompt: String, meta: Option<Value>) -> anyhow::Result<AgentTurn> {
     send_prompt_turn_streaming(prompt, meta, |_| {}).await
 }
@@ -530,31 +499,6 @@ async fn prompt_yes_no(title: &str, body: String) -> anyhow::Result<bool> {
     Ok(rx.await.unwrap_or(false))
 }
 
-pub async fn send_prompt(prompt: String, meta: Option<Value>) -> anyhow::Result<u64> {
-    let Some(mut running) = take_running_agent() else {
-        anyhow::bail!("no agent is running");
-    };
-
-    let Some(session_id) = running.session_id.clone() else {
-        restore_running_agent(running);
-        anyhow::bail!(
-            "agent session id is not known yet; run :agent recv until :agent status shows a session"
-        );
-    };
-
-    let request_id = running.next_request_id;
-    running.next_request_id += 1;
-    let request = super::acp::prompt_request(request_id, session_id, prompt, meta)?;
-    log::info!(
-        "sending detached agent prompt request {request_id} to '{}'",
-        running.name
-    );
-    let send_result = running.process.send(&request).await;
-    restore_running_agent(running);
-    send_result?;
-    Ok(request_id)
-}
-
 #[derive(Debug, serde::Serialize)]
 pub struct AgentTurn {
     pub request_id: u64,
@@ -918,13 +862,19 @@ fn log_agent_message(phase: &str, message: &JsonRpcMessage) {
             );
         }
         JsonRpcMessage::Notification(notification) => {
-            log::info!(
+            let log_message = format!(
                 "agent {phase} notification: method={}, update={:?}, tool={:?}, status={:?}",
                 notification.method,
                 notification_update_kind(notification.params.as_ref()),
                 notification_tool_kind(notification.params.as_ref()),
                 notification_tool_status(notification.params.as_ref())
             );
+            if notification_update_kind(notification.params.as_ref()) == Some("agent_message_chunk")
+            {
+                log::debug!("{log_message}");
+            } else {
+                log::info!("{log_message}");
+            }
         }
     }
 }

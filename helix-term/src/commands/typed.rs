@@ -41,8 +41,6 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "start",
     "status",
     "stop",
-    "recv",
-    "prompt",
 ];
 static AGENT_PENDING_TURN_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -664,38 +662,6 @@ fn cancel_agent(cx: &mut compositor::Context) {
             }
         })))
     });
-}
-
-fn recv_agent(cx: &mut compositor::Context) {
-    cx.jobs.callback(async move {
-        let message = crate::agent::runtime::recv_next().await?;
-        let contents = serde_json::to_string_pretty(&message)?;
-        let status = agent_status_message();
-        Ok(job::Callback::Editor(Box::new(move |editor| {
-            if let Err(err) = open_agent_json_scratch_editor(editor, contents) {
-                editor.set_error(err.to_string());
-            } else {
-                editor.set_status(status);
-            }
-        })))
-    });
-}
-
-fn prompt_agent(cx: &mut compositor::Context, prompt: String) -> anyhow::Result<()> {
-    let meta = serde_json::json!({
-        "helix": {
-            "context": crate::agent::context::current_snapshot(cx.editor),
-        }
-    });
-
-    cx.jobs.callback(async move {
-        let request_id = crate::agent::runtime::send_prompt(prompt, Some(meta)).await?;
-        Ok(job::Callback::Editor(Box::new(move |editor| {
-            editor.set_status(format!("Sent agent prompt request #{request_id}"));
-        })))
-    });
-
-    Ok(())
 }
 
 fn chat_agent(cx: &mut compositor::Context) {
@@ -2058,18 +2024,6 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("stop") => {
             stop_agent(cx);
             Ok(())
-        }
-        Some("recv") => {
-            recv_agent(cx);
-            Ok(())
-        }
-        Some("prompt") => {
-            let prompt = args
-                .get(1)
-                .map(str::trim)
-                .filter(|prompt| !prompt.is_empty())
-                .context("agent prompt requires text")?;
-            prompt_agent(cx, prompt.to_string())
         }
         Some("chat") => {
             chat_agent(cx);
