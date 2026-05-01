@@ -84,12 +84,19 @@ impl EditorView {
         is_focused: bool,
     ) {
         let inner = view.inner_area(doc);
-        let area = view.area;
         let theme = &editor.theme;
         let config = editor.config();
         let loader = editor.syn_loader.load();
 
         let view_offset = doc.view_offset(view.id);
+
+        if Self::is_agent_transcript_doc(doc) {
+            Self::render_agent_transcript_markdown(editor, doc, view, surface);
+            self.render_view_border_and_statusline(
+                editor, doc, view, viewport, surface, is_focused,
+            );
+            return;
+        }
 
         let text_annotations = view.text_annotations(doc, Some(theme));
         let mut decorations = DecorationManager::default();
@@ -217,22 +224,33 @@ impl EditorView {
             decorations,
         );
 
-        // if we're not at the edge of the screen, draw a right border
-        if viewport.right() != view.area.right() {
-            let x = area.right();
-            let border_style = theme.get("ui.window");
-            for y in area.top()..area.bottom() {
-                surface[(x, y)]
-                    .set_symbol(tui::symbols::line::VERTICAL)
-                    //.set_symbol(" ")
-                    .set_style(border_style);
-            }
-        }
-
         if config.inline_diagnostics.disabled()
             && config.end_of_line_diagnostics == DiagnosticFilter::Disable
         {
             Self::render_diagnostics(doc, view, inner, surface, theme);
+        }
+
+        self.render_view_border_and_statusline(editor, doc, view, viewport, surface, is_focused);
+    }
+
+    fn render_view_border_and_statusline(
+        &self,
+        editor: &Editor,
+        doc: &Document,
+        view: &View,
+        viewport: Rect,
+        surface: &mut Surface,
+        is_focused: bool,
+    ) {
+        // if we're not at the edge of the screen, draw a right border
+        if viewport.right() != view.area.right() {
+            let x = view.area.right();
+            let border_style = editor.theme.get("ui.window");
+            for y in view.area.top()..view.area.bottom() {
+                surface[(x, y)]
+                    .set_symbol(tui::symbols::line::VERTICAL)
+                    .set_style(border_style);
+            }
         }
 
         let statusline_area = view
@@ -244,6 +262,37 @@ impl EditorView {
             statusline::RenderContext::new(editor, doc, view, is_focused, &self.spinners);
 
         statusline::render(&mut context, statusline_area, surface);
+    }
+
+    fn is_agent_transcript_doc(doc: &Document) -> bool {
+        doc.path().is_none() && doc.display_name() == "[agent]"
+    }
+
+    fn render_agent_transcript_markdown(
+        editor: &Editor,
+        doc: &Document,
+        view: &View,
+        surface: &mut Surface,
+    ) {
+        use tui::widgets::{Paragraph, Widget, Wrap};
+
+        let viewport = view.inner_area(doc);
+        if viewport.area() == 0 {
+            return;
+        }
+
+        let contents = doc.text().to_string();
+        let markdown = super::Markdown::new(contents, editor.syn_loader.clone());
+        let text = markdown.parse(Some(&editor.theme));
+        let scroll = doc
+            .text()
+            .char_to_line(doc.view_offset(view.id).anchor)
+            .min(u16::MAX as usize) as u16;
+        let paragraph = Paragraph::new(&text)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0));
+
+        paragraph.render(viewport, surface);
     }
 
     pub fn render_rulers(
