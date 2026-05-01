@@ -14,6 +14,7 @@ runtime_local! {
     static AGENT_RUNTIME: Mutex<Option<RunningAgent>> = Mutex::new(None);
     static AGENT_TRANSCRIPT: Mutex<Option<DocumentId>> = Mutex::new(None);
     static AGENT_LATEST_PATCH: Mutex<Option<AgentPatchProposal>> = Mutex::new(None);
+    static AGENT_TRANSCRIPT_TURNS: Mutex<Vec<AgentTranscriptTurn>> = Mutex::new(Vec::new());
 }
 
 static AGENT_CANCEL_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -246,6 +247,99 @@ pub struct AgentPatchProposal {
     pub cwd: String,
     pub source_path: Option<String>,
     pub request_id: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct AgentTranscriptTurn {
+    pub id: u64,
+    pub prompt: String,
+    pub response: Option<String>,
+    pub status: AgentTranscriptStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentTranscriptStatus {
+    Pending,
+    Complete,
+    Cancelled,
+    Failed,
+}
+
+pub fn append_transcript_turn(id: u64, prompt: String) {
+    AGENT_TRANSCRIPT_TURNS
+        .lock()
+        .expect("agent transcript turns lock poisoned")
+        .push(AgentTranscriptTurn {
+            id,
+            prompt,
+            response: None,
+            status: AgentTranscriptStatus::Pending,
+        });
+}
+
+pub fn complete_transcript_turn(id: u64, response: String) {
+    update_transcript_turn(id, AgentTranscriptStatus::Complete, Some(response));
+}
+
+pub fn fail_transcript_turn(id: u64, response: String) {
+    update_transcript_turn(id, AgentTranscriptStatus::Failed, Some(response));
+}
+
+pub fn cancel_pending_transcript_turns() -> usize {
+    let mut turns = AGENT_TRANSCRIPT_TURNS
+        .lock()
+        .expect("agent transcript turns lock poisoned");
+    let mut cancelled = 0;
+    for turn in turns.iter_mut() {
+        if turn.status == AgentTranscriptStatus::Pending {
+            turn.status = AgentTranscriptStatus::Cancelled;
+            turn.response = Some("Cancelled".to_string());
+            cancelled += 1;
+        }
+    }
+    cancelled
+}
+
+pub fn clear_transcript_turns() {
+    AGENT_TRANSCRIPT_TURNS
+        .lock()
+        .expect("agent transcript turns lock poisoned")
+        .clear();
+}
+
+pub fn render_transcript() -> String {
+    let turns = AGENT_TRANSCRIPT_TURNS
+        .lock()
+        .expect("agent transcript turns lock poisoned");
+    let mut rendered = String::new();
+    for (index, turn) in turns.iter().enumerate() {
+        if index > 0 {
+            rendered.push_str("\n\n---\n\n");
+        }
+
+        rendered.push_str(&format!("**You:**\n\n{}\n\n", turn.prompt.trim()));
+        rendered.push_str("**Codex:**\n\n");
+        match turn.status {
+            AgentTranscriptStatus::Pending => {
+                rendered.push_str(&format!("Working... [turn {}]", turn.id));
+            }
+            AgentTranscriptStatus::Cancelled => rendered.push_str("Cancelled"),
+            AgentTranscriptStatus::Failed | AgentTranscriptStatus::Complete => {
+                rendered.push_str(turn.response.as_deref().unwrap_or(""));
+            }
+        }
+    }
+    rendered
+}
+
+fn update_transcript_turn(id: u64, status: AgentTranscriptStatus, response: Option<String>) {
+    let mut turns = AGENT_TRANSCRIPT_TURNS
+        .lock()
+        .expect("agent transcript turns lock poisoned");
+    if let Some(turn) = turns.iter_mut().find(|turn| turn.id == id) {
+        turn.status = status;
+        turn.response = response;
+    }
 }
 
 pub fn transcript_doc_id() -> Option<DocumentId> {

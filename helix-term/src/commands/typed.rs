@@ -765,10 +765,11 @@ fn open_agent_panel(cx: &mut compositor::Context) {
     let position = cx.editor.config().agent.panel_position;
     let action = agent_panel_action(position);
     let (doc_id, created) = agent_transcript_doc_id(cx.editor, action);
-    prepare_agent_transcript_doc(cx.editor, doc_id, action);
+    let view_id = prepare_agent_transcript_doc(cx.editor, doc_id, action);
     if created {
         place_agent_panel(cx.editor, position);
     }
+    render_agent_transcript_editor(cx.editor, doc_id, view_id);
     cx.editor.set_status("Agent panel focused");
 }
 
@@ -781,10 +782,8 @@ fn clear_agent_panel(cx: &mut compositor::Context) {
     };
 
     let view_id = prepare_agent_transcript_doc(cx.editor, doc_id, Action::Replace);
-    let doc = doc_mut!(cx.editor, &doc_id);
-    let transaction = Transaction::delete(doc.text(), [(0, doc.text().len_chars())].into_iter());
-    doc.apply(&transaction, view_id);
-    doc.set_selection(view_id, Selection::point(0));
+    crate::agent::runtime::clear_transcript_turns();
+    render_agent_transcript_editor(cx.editor, doc_id, view_id);
     cx.editor.set_status("Agent transcript cleared");
 }
 
@@ -1274,21 +1273,9 @@ fn append_agent_pending_transcript_editor(
     if created {
         place_agent_panel(editor, position);
     }
-    let loader = editor.syn_loader.load();
-    let doc = doc_mut!(editor, &doc_id);
-
-    let prefix = if doc.text().len_chars() == 0 {
-        String::new()
-    } else {
-        "\n\n---\n\n".to_string()
-    };
     let pending_id = AGENT_PENDING_TURN_ID.fetch_add(1, Ordering::Relaxed);
-    let pending = agent_pending_marker(pending_id);
-    let header = format!("{prefix}**You:**\n\n{}\n\n**Codex:**\n\n", prompt.trim());
-    let insertion = format!("{header}{pending}\n");
-
-    insert_agent_transcript_text(doc, view_id, insertion);
-    doc.set_language_by_language_id("markdown", &loader).ok();
+    crate::agent::runtime::append_transcript_turn(pending_id, prompt.trim().to_string());
+    render_agent_transcript_editor(editor, doc_id, view_id);
 
     Ok(AgentPendingTurn {
         doc_id,
@@ -1302,35 +1289,22 @@ fn replace_agent_pending_transcript_editor(
     contents: String,
 ) -> anyhow::Result<()> {
     if editor.document(pending_turn.doc_id).is_none() {
-        append_agent_response_to_transcript(editor, "(original prompt unavailable)", &contents)?;
         return Ok(());
     }
 
     let position = editor.config().agent.panel_position;
     let action = agent_panel_action(position);
     let view_id = prepare_agent_transcript_doc(editor, pending_turn.doc_id, action);
+    crate::agent::runtime::complete_transcript_turn(pending_turn.id, contents.trim().to_string());
+    render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
     let doc = doc_mut!(editor, &pending_turn.doc_id);
-    let marker = agent_pending_marker(pending_turn.id);
-    let Some((response_start, response_end)) = find_doc_text_char_range(doc, &marker) else {
-        append_agent_response_to_transcript(editor, "(pending marker not found)", &contents)?;
-        return Ok(());
-    };
-    let replacement = format!("{}\n", contents.trim());
-    let transaction = Transaction::change(
-        doc.text(),
-        [(response_start, response_end, Some(replacement.into()))].into_iter(),
-    );
-    doc.apply(&transaction, view_id);
-    doc.set_selection(view_id, Selection::point(response_start));
+    let cursor = doc.text().len_chars();
+    doc.set_selection(view_id, Selection::point(cursor));
     let scrolloff = editor.config().scrolloff;
     let (view, doc) = current!(editor);
     view.ensure_cursor_in_view(doc, scrolloff);
 
     Ok(())
-}
-
-fn agent_pending_marker(id: u64) -> String {
-    format!("Working... [turn {id}]")
 }
 
 fn cancel_agent_pending_turns(editor: &mut Editor) -> usize {
@@ -1340,48 +1314,29 @@ fn cancel_agent_pending_turns(editor: &mut Editor) -> usize {
         return 0;
     };
 
-    let view_id = prepare_agent_transcript_doc(editor, doc_id, Action::Replace);
-    let doc = doc_mut!(editor, &doc_id);
-    let text = doc.text().slice(..).to_string();
-    let mut changes = Vec::new();
-    let mut search_start = 0;
-
-    while let Some(relative_start) = text[search_start..].find("Working... [turn ") {
-        let start_byte = search_start + relative_start;
-        let Some(relative_end) = text[start_byte..].find(']') else {
-            break;
-        };
-        let end_byte = start_byte + relative_end + 1;
-        let start = doc.text().byte_to_char(start_byte);
-        let end = doc.text().byte_to_char(end_byte);
-        changes.push((start, end, Some("Cancelled".into())));
-        search_start = end_byte;
-    }
-
-    let cancelled = changes.len();
+    let cancelled = crate::agent::runtime::cancel_pending_transcript_turns();
     if cancelled > 0 {
-        let transaction = Transaction::change(doc.text(), changes.into_iter());
-        doc.apply(&transaction, view_id);
+        let view_id = prepare_agent_transcript_doc(editor, doc_id, Action::Replace);
+        render_agent_transcript_editor(editor, doc_id, view_id);
     }
 
     cancelled
 }
 
-fn find_doc_text_char_range(doc: &helix_view::Document, needle: &str) -> Option<(usize, usize)> {
-    let haystack = doc.text().slice(..).to_string();
-    let start_byte = haystack.find(needle)?;
-    let end_byte = start_byte + needle.len();
-    let text = doc.text();
-    Some((text.byte_to_char(start_byte), text.byte_to_char(end_byte)))
-}
-
-fn append_agent_response_to_transcript(
+fn render_agent_transcript_editor(
     editor: &mut Editor,
-    prompt: &str,
-    contents: &str,
-) -> anyhow::Result<()> {
-    let pending_turn = append_agent_pending_transcript_editor(editor, prompt)?;
-    replace_agent_pending_transcript_editor(editor, pending_turn, contents.to_string())
+    doc_id: helix_view::DocumentId,
+    view_id: helix_view::ViewId,
+) {
+    let loader = editor.syn_loader.load();
+    let contents = crate::agent::runtime::render_transcript();
+    let doc = doc_mut!(editor, &doc_id);
+    let transaction = Transaction::change(
+        doc.text(),
+        [(0, doc.text().len_chars(), Some(contents.into()))].into_iter(),
+    );
+    doc.apply(&transaction, view_id);
+    doc.set_language_by_language_id("markdown", &loader).ok();
 }
 
 fn agent_transcript_doc_id(editor: &mut Editor, action: Action) -> (helix_view::DocumentId, bool) {
@@ -1456,17 +1411,6 @@ fn focus_existing_agent_transcript_doc(
     let doc = doc_mut!(editor, &doc_id);
     doc.ensure_view_init(keep_view_id);
     Some(keep_view_id)
-}
-
-fn insert_agent_transcript_text(
-    doc: &mut helix_view::Document,
-    view_id: helix_view::ViewId,
-    insertion: String,
-) {
-    let insert_at = doc.text().len_chars();
-    let selection = Selection::point(insert_at);
-    let transaction = Transaction::insert(doc.text(), &selection, insertion.into());
-    doc.apply(&transaction, view_id);
 }
 
 fn open_agent_scratch_editor(
