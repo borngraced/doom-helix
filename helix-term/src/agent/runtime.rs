@@ -171,6 +171,7 @@ where
     });
 
     let mut messages = Vec::new();
+    let mut session_response = None;
     while running.session_id.is_none() {
         let message = recv_running_message(&mut running).await?;
         update_session_id(&mut running, &message);
@@ -179,6 +180,9 @@ where
             let _ = running.process.kill().await;
             anyhow::bail!(message);
         }
+        if matches!(&message, JsonRpcMessage::Response(response) if response.id == 2) {
+            session_response = Some(serde_json::to_value(&message)?);
+        }
         messages.push(message);
     }
 
@@ -186,6 +190,31 @@ where
         .session_id
         .clone()
         .expect("session id checked before prompt send");
+    if let Some(request) =
+        approval_mode_request(&mut running, &session_id, session_response.as_ref())?
+    {
+        let mode_request_id = request.id;
+        log::info!(
+            "setting agent approval mode with request {mode_request_id} for '{}' session {}",
+            running.name,
+            session_id
+        );
+        running.process.send(&request).await?;
+        loop {
+            let message = recv_running_message(&mut running).await?;
+            if let Some(response) = handle_agent_request(&message).await? {
+                running.process.send(&response).await?;
+                continue;
+            }
+            let mode_set_done = matches!(&message, JsonRpcMessage::Response(response) if response.id == mode_request_id);
+            update_session_id(&mut running, &message);
+            on_message(&message);
+            messages.push(message);
+            if mode_set_done {
+                break;
+            }
+        }
+    }
     let request_id = running.next_request_id;
     running.next_request_id += 1;
     update_busy_agent_request(request_id);
@@ -769,4 +798,143 @@ fn session_new_failure_message(message: &JsonRpcMessage) -> Option<String> {
         Some(error) => format!("agent session/new failed: {}", error.message),
         None => "agent session/new response did not include a sessionId".to_string(),
     })
+}
+
+fn approval_mode_request(
+    running: &mut RunningAgent,
+    session_id: &str,
+    session_response: Option<&Value>,
+) -> anyhow::Result<Option<JsonRpcRequest>> {
+    let Some(response) = session_response else {
+        return Ok(None);
+    };
+    let Some(result) = response.get("result") else {
+        return Ok(None);
+    };
+
+    if let Some((config_id, value)) = preferred_config_mode(result) {
+        let request_id = running.next_request_id;
+        running.next_request_id += 1;
+        return Ok(Some(super::acp::set_config_option_request(
+            request_id,
+            session_id.to_string(),
+            config_id,
+            value,
+        )?));
+    }
+
+    if let Some(mode_id) = preferred_session_mode(result) {
+        let request_id = running.next_request_id;
+        running.next_request_id += 1;
+        return Ok(Some(super::acp::set_mode_request(
+            request_id,
+            session_id.to_string(),
+            mode_id,
+        )?));
+    }
+
+    Ok(None)
+}
+
+fn preferred_config_mode(result: &Value) -> Option<(String, String)> {
+    let config_options = result.get("configOptions")?.as_array()?;
+    for option in config_options {
+        let category = option.get("category").and_then(Value::as_str);
+        let id = option.get("id").and_then(Value::as_str)?;
+        if category != Some("mode") && id != "mode" {
+            continue;
+        }
+
+        let current = option.get("currentValue").and_then(Value::as_str);
+        let values = config_option_values(option);
+        let value = preferred_mode_value(&values, current)?;
+        return Some((id.to_string(), value));
+    }
+
+    None
+}
+
+fn config_option_values(option: &Value) -> Vec<String> {
+    option
+        .get("options")
+        .and_then(Value::as_array)
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(|option| option.get("value").and_then(Value::as_str))
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn preferred_session_mode(result: &Value) -> Option<String> {
+    let modes = result.get("modes")?;
+    let current = modes.get("currentModeId").and_then(Value::as_str);
+    let values = modes
+        .get("availableModes")?
+        .as_array()?
+        .iter()
+        .filter_map(|mode| mode.get("id").and_then(Value::as_str))
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    preferred_mode_value(&values, current)
+}
+
+fn preferred_mode_value(values: &[String], current: Option<&str>) -> Option<String> {
+    const PREFERRED_APPROVAL_MODES: &[&str] = &["suggest", "ask"];
+    for preferred in PREFERRED_APPROVAL_MODES {
+        if values.iter().any(|value| value == preferred) && current != Some(*preferred) {
+            return Some((*preferred).to_string());
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn prefers_suggest_config_mode() {
+        let result = json!({
+            "configOptions": [
+                {
+                    "id": "mode",
+                    "category": "mode",
+                    "currentValue": "full-auto",
+                    "options": [
+                        { "value": "read-only" },
+                        { "value": "suggest" },
+                        { "value": "auto-edit" },
+                        { "value": "full-auto" }
+                    ]
+                }
+            ]
+        });
+
+        assert_eq!(
+            preferred_config_mode(&result),
+            Some(("mode".to_string(), "suggest".to_string()))
+        );
+    }
+
+    #[test]
+    fn falls_back_to_ask_session_mode() {
+        let result = json!({
+            "modes": {
+                "currentModeId": "code",
+                "availableModes": [
+                    { "id": "ask" },
+                    { "id": "code" }
+                ]
+            }
+        });
+
+        assert_eq!(preferred_session_mode(&result), Some("ask".to_string()));
+    }
 }

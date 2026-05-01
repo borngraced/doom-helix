@@ -112,6 +112,21 @@ pub struct PromptParams {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetModeParams {
+    pub session_id: String,
+    pub mode_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetConfigOptionParams {
+    pub session_id: String,
+    pub config_id: String,
+    pub value: String,
+}
+
+#[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     Text { text: String },
@@ -171,6 +186,40 @@ pub fn prompt_request(
             session_id,
             prompt: vec![ContentBlock::Text { text: prompt }],
             meta,
+        })?,
+    })
+}
+
+pub fn set_mode_request(
+    id: u64,
+    session_id: String,
+    mode_id: String,
+) -> anyhow::Result<JsonRpcRequest> {
+    Ok(JsonRpcRequest {
+        jsonrpc: "2.0",
+        id,
+        method: "session/set_mode",
+        params: serde_json::to_value(SetModeParams {
+            session_id,
+            mode_id,
+        })?,
+    })
+}
+
+pub fn set_config_option_request(
+    id: u64,
+    session_id: String,
+    config_id: String,
+    value: String,
+) -> anyhow::Result<JsonRpcRequest> {
+    Ok(JsonRpcRequest {
+        jsonrpc: "2.0",
+        id,
+        method: "session/set_config_option",
+        params: serde_json::to_value(SetConfigOptionParams {
+            session_id,
+            config_id,
+            value,
         })?,
     })
 }
