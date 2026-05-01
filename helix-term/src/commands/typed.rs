@@ -780,7 +780,13 @@ fn open_agent_patch(cx: &mut compositor::Context) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    open_agent_named_scratch_editor(cx.editor, proposal.patch, "diff", "[agent patch]", true)
+    open_agent_named_scratch_editor(
+        cx.editor,
+        agent_patch_preview(&proposal),
+        "diff",
+        "[agent patch]",
+        true,
+    )
 }
 
 fn apply_agent_patch(cx: &mut compositor::Context) {
@@ -873,6 +879,16 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
             },
         )))
     });
+}
+
+fn agent_patch_preview(proposal: &crate::agent::runtime::AgentPatchProposal) -> String {
+    format!(
+        "# agent patch\n# turn: {}\n# cwd: {}\n# source: {}\n\n{}",
+        proposal.request_id,
+        proposal.cwd,
+        proposal.source_path.as_deref().unwrap_or("<unknown>"),
+        proposal.patch.trim()
+    )
 }
 
 fn agent_patch_apply_diagnostics(
