@@ -49,19 +49,22 @@ Sends a `session/prompt` request to the running agent. The prompt includes a fre
 
 `:agent chat`
 
-Opens an agent prompt in Helix's prompt UI. When submitted, Helix sends the prompt with a fresh context snapshot, automatically reads any pending handshake messages, waits for the prompt turn to finish, and opens the agent text in a Markdown scratch buffer.
+Opens an agent prompt in Helix's prompt UI. When submitted, Helix starts the configured agent if needed, sends the prompt with a fresh context snapshot, automatically reads any pending handshake messages, waits for the prompt turn to finish, and appends the agent text to the transcript buffer.
 
 `:agent explain`
 
 Explains the current primary selection. The selected text is included directly in the prompt with file path and line/column range.
+Starts the configured agent first if needed.
 
 `:agent fix`
 
 Asks Codex to identify a problem in the current primary selection and propose a fix without editing files.
+Starts the configured agent first if needed.
 
 `:agent refactor`
 
 Asks Codex to suggest a clean refactor for the current primary selection without editing files.
+Starts the configured agent first if needed.
 
 `:agent-context`
 

@@ -46,6 +46,22 @@ pub async fn start(
     Ok(())
 }
 
+pub async fn ensure_started(
+    launch_config: AgentLaunchConfig,
+    handshake: Vec<JsonRpcRequest>,
+) -> anyhow::Result<bool> {
+    if AGENT_RUNTIME
+        .lock()
+        .expect("agent runtime lock poisoned")
+        .is_some()
+    {
+        return Ok(false);
+    }
+
+    start(launch_config, handshake).await?;
+    Ok(true)
+}
+
 pub async fn stop() -> anyhow::Result<Option<String>> {
     let Some(mut running) = take_running_agent() else {
         return Ok(None);

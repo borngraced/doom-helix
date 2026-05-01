@@ -725,6 +725,8 @@ fn refactor_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
 
 fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Result<()> {
     let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
+    let launch_config = cx.editor.config().agent.launch_config()?;
+    let handshake = crate::agent::acp::session_handshake(cx.editor)?;
     let meta = serde_json::json!({
         "helix": {
             "context": crate::agent::context::current_snapshot(cx.editor),
@@ -734,7 +736,13 @@ fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Re
     let pending_range = append_agent_pending_transcript_editor(cx.editor, &prompt)?;
 
     cx.jobs.callback(async move {
-        helix_event::status::report("Agent request sent to Codex...").await;
+        let started = crate::agent::runtime::ensure_started(launch_config, handshake).await?;
+        let status = if started {
+            "Agent started; request sent to Codex..."
+        } else {
+            "Agent request sent to Codex..."
+        };
+        helix_event::status::report(status).await;
         let turn = crate::agent::runtime::send_prompt_turn(prompt, Some(meta)).await?;
         let contents = agent_turn_response_markdown(&turn)?;
         let request_id = turn.request_id;
@@ -838,6 +846,10 @@ fn replace_agent_pending_transcript_editor(
         .into_iter(),
     );
     doc.apply(&transaction, view_id);
+    doc.set_selection(view_id, Selection::point(pending_range.response_start));
+    let scrolloff = editor.config().scrolloff;
+    let (view, doc) = current!(editor);
+    view.ensure_cursor_in_view(doc, scrolloff);
 
     Ok(())
 }
