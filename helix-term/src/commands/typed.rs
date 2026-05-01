@@ -1256,7 +1256,38 @@ fn prompt_agent_turn(
                 "Agent request sent to Codex..."
             };
             helix_event::status::report(status).await;
-            let turn = crate::agent::runtime::send_prompt_turn(prompt, Some(meta)).await?;
+            let stream_pending_range = pending_range;
+            let turn = crate::agent::runtime::send_prompt_turn_streaming(
+                prompt,
+                Some(meta),
+                move |message| {
+                    if crate::agent::runtime::is_cancelled(cancel_generation) {
+                        return;
+                    }
+
+                    match agent_message_update_markdown_chunk(message) {
+                        Ok(Some(chunk)) => {
+                            crate::job::dispatch_blocking(move |editor, _compositor| {
+                                if let Err(err) = append_agent_streaming_transcript_editor(
+                                    editor,
+                                    stream_pending_range,
+                                    chunk,
+                                ) {
+                                    editor.set_error(err.to_string());
+                                }
+                            });
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            let message = err.to_string();
+                            crate::job::dispatch_blocking(move |editor, _compositor| {
+                                editor.set_error(message);
+                            });
+                        }
+                    }
+                },
+            )
+            .await?;
             if crate::agent::runtime::is_cancelled(cancel_generation) {
                 let _ = crate::agent::runtime::stop().await;
                 return Ok(None);
@@ -1407,6 +1438,27 @@ fn replace_agent_pending_transcript_editor(
     Ok(())
 }
 
+fn append_agent_streaming_transcript_editor(
+    editor: &mut Editor,
+    pending_turn: AgentPendingTurn,
+    chunk: String,
+) -> anyhow::Result<()> {
+    crate::agent::runtime::append_transcript_turn_response(pending_turn.id, chunk);
+
+    if editor.document(pending_turn.doc_id).is_none() {
+        return Ok(());
+    }
+
+    let Some(view_id) = agent_transcript_view_id(editor, pending_turn.doc_id) else {
+        return Ok(());
+    };
+
+    render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
+    move_agent_transcript_cursor_to_end(editor, pending_turn.doc_id, view_id);
+
+    Ok(())
+}
+
 fn fail_agent_pending_transcript_editor(
     editor: &mut Editor,
     pending_turn: AgentPendingTurn,
@@ -1553,6 +1605,17 @@ fn focus_existing_agent_transcript_doc(
     Some(keep_view_id)
 }
 
+fn agent_transcript_view_id(
+    editor: &Editor,
+    doc_id: helix_view::DocumentId,
+) -> Option<helix_view::ViewId> {
+    editor
+        .tree
+        .views()
+        .find(|(view, _)| view.doc == doc_id)
+        .map(|(view, _)| view.id)
+}
+
 fn open_agent_scratch_editor(
     editor: &mut Editor,
     contents: String,
@@ -1670,6 +1733,42 @@ fn agent_turn_response_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyh
     }
 
     Ok(normalize_agent_markdown_fence_languages(response.trim()))
+}
+
+fn agent_message_update_markdown_chunk(
+    message: &crate::agent::acp::JsonRpcMessage,
+) -> anyhow::Result<Option<String>> {
+    let value = serde_json::to_value(message)?;
+    let Some(method) = value.get("method").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+
+    if method != "session/update" {
+        return Ok(None);
+    }
+
+    let Some(update) = value.get("params").and_then(|params| params.get("update")) else {
+        return Ok(None);
+    };
+
+    let update_kind = update
+        .get("sessionUpdate")
+        .and_then(Value::as_str)
+        .unwrap_or("update");
+    let Some(text) = update
+        .get("content")
+        .and_then(|content| content.get("text"))
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+
+    match update_kind {
+        "agent_message_chunk" => Ok(Some(text.to_string())),
+        "agent_thought_chunk" => Ok(Some(format!("\n\n> {text}"))),
+        "user_message_chunk" => Ok(None),
+        _ => Ok(Some(format!("\n\n`{update_kind}`: {text}"))),
+    }
 }
 
 fn normalize_agent_markdown_fence_languages(markdown: &str) -> String {

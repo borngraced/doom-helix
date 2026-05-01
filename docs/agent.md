@@ -49,7 +49,7 @@ Sends a `session/prompt` request to the running agent. The prompt includes a fre
 
 `:agent chat`
 
-Opens an agent prompt in Helix's prompt UI. When submitted, Helix starts the configured agent if needed, sends the prompt with a fresh context snapshot, automatically reads any pending handshake messages, waits for the prompt turn to finish, and appends the agent text to the transcript buffer.
+Opens an agent prompt in Helix's prompt UI. When submitted, Helix starts the configured agent if needed, sends the prompt with a fresh context snapshot, automatically reads any pending handshake messages, and streams agent response chunks into the transcript buffer as they arrive.
 
 `:agent ask <text>`
 
@@ -163,7 +163,7 @@ For Codex, build the experimental adapter first:
 cargo build -p helix-codex-agent
 ```
 
-Then configure Helix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to Helix and forwards prompt turns to `codex exec --skip-git-repo-check --sandbox read-only` with the current Helix context included in stdin. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
+Then configure Helix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to Helix and forwards prompt turns to `codex exec --skip-git-repo-check --sandbox read-only` with the current Helix context included in stdin. It forwards `codex exec` stdout as ACP `agent_message_chunk` updates while the process is still running. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
 
 The adapter is intentionally read-only. It should return explanations or proposed patches, not write files directly. For edits, Codex returns a unified diff; Helix previews it with `:agent patch` and applies it with `:agent apply` only after confirmation.
 

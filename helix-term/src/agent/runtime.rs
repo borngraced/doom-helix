@@ -119,6 +119,17 @@ pub async fn recv_next() -> anyhow::Result<JsonRpcMessage> {
 }
 
 pub async fn send_prompt_turn(prompt: String, meta: Option<Value>) -> anyhow::Result<AgentTurn> {
+    send_prompt_turn_streaming(prompt, meta, |_| {}).await
+}
+
+pub async fn send_prompt_turn_streaming<F>(
+    prompt: String,
+    meta: Option<Value>,
+    mut on_message: F,
+) -> anyhow::Result<AgentTurn>
+where
+    F: FnMut(&JsonRpcMessage) + Send,
+{
     let Some(mut running) = take_running_agent() else {
         anyhow::bail!("no agent is running");
     };
@@ -145,6 +156,7 @@ pub async fn send_prompt_turn(prompt: String, meta: Option<Value>) -> anyhow::Re
         let turn_done =
             matches!(&message, JsonRpcMessage::Response(response) if response.id == request_id);
         update_session_id(&mut running, &message);
+        on_message(&message);
         messages.push(message);
         if turn_done {
             restore_running_agent(running);
@@ -304,6 +316,21 @@ pub fn complete_transcript_turn(id: u64, response: String) {
     update_transcript_turn(id, AgentTranscriptStatus::Complete, Some(response));
 }
 
+pub fn append_transcript_turn_response(id: u64, chunk: String) {
+    if chunk.is_empty() {
+        return;
+    }
+
+    let mut turns = AGENT_TRANSCRIPT_TURNS
+        .lock()
+        .expect("agent transcript turns lock poisoned");
+    if let Some(turn) = turns.iter_mut().find(|turn| turn.id == id) {
+        turn.response
+            .get_or_insert_with(String::new)
+            .push_str(&chunk);
+    }
+}
+
 pub fn fail_transcript_turn(id: u64, response: String) {
     update_transcript_turn(id, AgentTranscriptStatus::Failed, Some(response));
 }
@@ -353,7 +380,16 @@ pub fn render_transcript() -> String {
         ));
         match turn.status {
             AgentTranscriptStatus::Pending => {
-                rendered.push_str(&format!("Working... [turn {}]", turn.id));
+                if let Some(response) = turn
+                    .response
+                    .as_ref()
+                    .filter(|response| !response.is_empty())
+                {
+                    rendered.push_str(response);
+                    rendered.push_str("\n\nWorking...");
+                } else {
+                    rendered.push_str(&format!("Working... [turn {}]", turn.id));
+                }
             }
             AgentTranscriptStatus::Cancelled => rendered.push_str("Cancelled"),
             AgentTranscriptStatus::Failed | AgentTranscriptStatus::Complete => {

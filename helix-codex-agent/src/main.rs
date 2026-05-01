@@ -2,8 +2,9 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::{
     env,
-    io::{self, BufRead, BufReader, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     process::{Command, Stdio},
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -61,24 +62,11 @@ fn main() -> Result<()> {
                     .to_string();
                 let prompt = prompt_text(&params);
                 let codex_prompt = codex_prompt(&prompt, params.get("_meta"));
-                let codex_output = run_codex_exec(state.cwd.as_deref(), &codex_prompt)?;
-
-                write_message(
+                run_codex_exec_stream(
+                    state.cwd.as_deref(),
+                    &codex_prompt,
+                    &session_id,
                     &mut output,
-                    &json!({
-                        "jsonrpc": "2.0",
-                        "method": "session/update",
-                        "params": {
-                            "sessionId": session_id,
-                            "update": {
-                                "sessionUpdate": "agent_message_chunk",
-                                "content": {
-                                    "type": "text",
-                                    "text": codex_output
-                                }
-                            }
-                        }
-                    }),
                 )?;
                 write_message(
                     &mut output,
@@ -178,7 +166,12 @@ fn codex_prompt(prompt: &str, meta: Option<&Value>) -> String {
     }
 }
 
-fn run_codex_exec(cwd: Option<&str>, prompt: &str) -> Result<String> {
+fn run_codex_exec_stream(
+    cwd: Option<&str>,
+    prompt: &str,
+    session_id: &str,
+    output: &mut impl Write,
+) -> Result<()> {
     let command = env::var("HELIX_CODEX_COMMAND").unwrap_or_else(|_| "codex".to_string());
     let mut child = Command::new(command);
     child
@@ -199,33 +192,87 @@ fn run_codex_exec(cwd: Option<&str>, prompt: &str) -> Result<String> {
     child.arg("-");
 
     let mut child = child.spawn().context("failed to spawn codex exec")?;
-    child
+    let mut stdin = child
         .stdin
         .take()
-        .context("codex exec stdin is unavailable")?
+        .context("codex exec stdin is unavailable")?;
+    stdin
         .write_all(prompt.as_bytes())
         .context("failed to write prompt to codex exec")?;
+    drop(stdin);
 
-    let output = child
-        .wait_with_output()
-        .context("failed to read codex exec output")?;
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = child
+        .stdout
+        .take()
+        .context("codex exec stdout is unavailable")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("codex exec stderr is unavailable")?;
+    let stderr_reader = thread::spawn(move || {
+        let mut stderr = stderr;
+        let mut buffer = String::new();
+        stderr.read_to_string(&mut buffer).map(|_| buffer)
+    });
 
-    if output.status.success() {
-        if stdout.is_empty() {
-            Ok("(codex exec completed without output)".to_string())
-        } else {
-            Ok(stdout)
+    let mut saw_stdout = false;
+    let mut stdout = BufReader::new(stdout);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let bytes = stdout
+            .read_line(&mut line)
+            .context("failed to read codex exec stdout")?;
+        if bytes == 0 {
+            break;
         }
-    } else if stderr.is_empty() {
-        Ok(format!("codex exec exited with {}", output.status))
-    } else {
-        Ok(format!(
-            "codex exec exited with {}:\n{}",
-            output.status, stderr
-        ))
+
+        saw_stdout = true;
+        write_agent_message_chunk(output, session_id, &line)?;
     }
+
+    let status = child.wait().context("failed to read codex exec output")?;
+    let stderr = stderr_reader
+        .join()
+        .unwrap_or_else(|_| Ok("failed to join codex stderr reader".to_string()))?
+        .trim()
+        .to_string();
+
+    if status.success() {
+        if !saw_stdout {
+            write_agent_message_chunk(output, session_id, "(codex exec completed without output)")?;
+        }
+        return Ok(());
+    }
+
+    let message = if stderr.is_empty() {
+        format!("codex exec exited with {status}")
+    } else {
+        format!("codex exec exited with {status}:\n{stderr}")
+    };
+    write_agent_message_chunk(output, session_id, &message)?;
+
+    Ok(())
+}
+
+fn write_agent_message_chunk(writer: &mut impl Write, session_id: &str, text: &str) -> Result<()> {
+    write_message(
+        writer,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {
+                        "type": "text",
+                        "text": text
+                    }
+                }
+            }
+        }),
+    )
 }
 
 fn new_session_id() -> String {
