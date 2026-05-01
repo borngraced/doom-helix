@@ -602,11 +602,6 @@ fn open_agent_context(cx: &mut compositor::Context) -> anyhow::Result<()> {
     open_agent_json_scratch(cx, snapshot)
 }
 
-fn open_agent_request(cx: &mut compositor::Context, prompt: &str) -> anyhow::Result<()> {
-    let request = crate::agent::context::current_request_pretty(cx.editor, prompt)?;
-    open_agent_json_scratch(cx, request)
-}
-
 fn open_agent_session(cx: &mut compositor::Context) -> anyhow::Result<()> {
     let session = crate::agent::session::new_session_pretty(cx.editor)?;
     open_agent_json_scratch(cx, session)
@@ -1339,6 +1334,7 @@ fn append_agent_pending_transcript_editor(
     let pending_id = AGENT_PENDING_TURN_ID.fetch_add(1, Ordering::Relaxed);
     crate::agent::runtime::append_transcript_turn(pending_id, kind, prompt.trim().to_string());
     render_agent_transcript_editor(editor, doc_id, view_id);
+    move_agent_transcript_cursor_to_end(editor, doc_id, view_id);
 
     Ok(AgentPendingTurn {
         doc_id,
@@ -1427,6 +1423,19 @@ fn render_agent_transcript_editor(
     doc.set_language_by_language_id("markdown", &loader).ok();
     doc.reset_modified();
     doc.readonly = true;
+}
+
+fn move_agent_transcript_cursor_to_end(
+    editor: &mut Editor,
+    doc_id: helix_view::DocumentId,
+    view_id: helix_view::ViewId,
+) {
+    let scrolloff = editor.config().scrolloff;
+    let doc = doc_mut!(editor, &doc_id);
+    let cursor = doc.text().len_chars();
+    doc.set_selection(view_id, Selection::point(cursor));
+    let view = view_mut!(editor, view_id);
+    view.ensure_cursor_in_view(doc, scrolloff);
 }
 
 fn agent_transcript_doc_id(editor: &mut Editor, action: Action) -> (helix_view::DocumentId, bool) {
@@ -1792,7 +1801,12 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
                 .map(str::trim)
                 .filter(|prompt| !prompt.is_empty())
                 .context("agent ask requires a prompt")?;
-            open_agent_request(cx, prompt)
+            prompt_agent_turn(
+                cx,
+                prompt.to_string(),
+                crate::agent::runtime::AgentTranscriptKind::Chat,
+                false,
+            )
         }
         Some(command) => bail!("unknown agent command: {command}"),
     }

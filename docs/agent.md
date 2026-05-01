@@ -51,6 +51,10 @@ Sends a `session/prompt` request to the running agent. The prompt includes a fre
 
 Opens an agent prompt in Helix's prompt UI. When submitted, Helix starts the configured agent if needed, sends the prompt with a fresh context snapshot, automatically reads any pending handshake messages, waits for the prompt turn to finish, and appends the agent text to the transcript buffer.
 
+`:agent ask <text>`
+
+Sends a direct chat turn without opening the prompt UI. This uses the same structured transcript path as `:agent chat`.
+
 `:agent explain`
 
 Explains the current primary selection. The selected text is included directly in the prompt with file path and line/column range.
@@ -95,17 +99,6 @@ Compatibility command that opens the same context snapshot directly.
 `:agent-new`
 
 Compatibility command that opens the same new session buffer directly.
-
-`:agent ask <prompt>`
-
-Opens a scratch buffer containing a dry-run agent request payload. The payload includes:
-
-- `schema_version`
-- request `kind`
-- user `prompt`
-- full editor context
-
-This does not call an external agent yet. It is a local preview of the payload that will later be sent to an ACP-compatible agent process.
 
 ## Current Context Fields
 
