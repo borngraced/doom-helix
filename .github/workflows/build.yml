@@ -80,7 +80,10 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest, ubuntu-24.04-arm]
+        os: [ubuntu-latest, macos-latest]
+        # Future targets once install/release packaging is tested there:
+        # - windows-latest
+        # - ubuntu-24.04-arm
 
   lints:
     name: Lints

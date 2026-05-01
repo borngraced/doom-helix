@@ -54,3 +54,57 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: dist/*.tar.gz*
+
+  macos:
+    name: macOS ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build DoomHelix
+        run: |
+          HELIX_DISABLE_AUTO_GRAMMAR_BUILD=1 cargo build --release --target "${{ matrix.target }}" -p helix-term --bin dhx
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          version="${GITHUB_REF_NAME:-dev}"
+          version="${version#v}"
+          target="${{ matrix.target }}"
+          package="doom-helix-${version}-${target}"
+          mkdir -p "dist/${package}"
+          cp "target/${target}/release/dhx" "dist/${package}/dhx-bin"
+          cp README.md LICENSE install.sh "dist/${package}/"
+          cp -r runtime "dist/${package}/runtime"
+          tar -C dist -czf "dist/${package}.tar.gz" "${package}"
+          (cd dist && shasum -a 256 "${package}.tar.gz" > "${package}.tar.gz.sha256")
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: doom-helix-${{ matrix.target }}
+          path: dist/*.tar.gz*
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/*.tar.gz*
