@@ -17,6 +17,7 @@ runtime_local! {
     static AGENT_TRANSCRIPT: Mutex<Option<DocumentId>> = Mutex::new(None);
     static AGENT_LATEST_PATCH: Mutex<Option<AgentPatchProposal>> = Mutex::new(None);
     static AGENT_TRANSCRIPT_TURNS: Mutex<Vec<AgentTranscriptTurn>> = Mutex::new(Vec::new());
+    static AGENT_TRANSCRIPT_LABEL: Mutex<Option<String>> = Mutex::new(None);
 }
 
 static AGENT_CANCEL_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -68,6 +69,7 @@ pub async fn start(
         process.send(&message).await?;
     }
     log::info!("agent '{}' handshake sent", launch_config.name);
+    set_transcript_agent_label(launch_config.name.clone());
 
     let mut agent = AGENT_RUNTIME.lock().expect("agent runtime lock poisoned");
     *agent = Some(RunningAgent {
@@ -145,6 +147,7 @@ where
         let message = recv_running_message(&mut running).await?;
         log_agent_message("startup", &message);
         update_session_id(&mut running, &message);
+        update_agent_display_name(&running, &message);
         update_busy_agent_session(running.session_id.clone());
         if let Some(message) = session_new_failure_message(&message) {
             let _ = running.process.kill().await;
@@ -710,6 +713,7 @@ pub fn clear_transcript_turns() {
 }
 
 pub fn render_transcript() -> String {
+    let agent_label = transcript_agent_label();
     let turns = AGENT_TRANSCRIPT_TURNS
         .lock()
         .expect("agent transcript turns lock poisoned");
@@ -720,7 +724,7 @@ pub fn render_transcript() -> String {
         }
 
         rendered.push_str(&format!("**You:**\n\n{}\n\n", turn.prompt.trim()));
-        rendered.push_str("**Codex:**\n\n");
+        rendered.push_str(&format!("**{agent_label}:**\n\n"));
         match turn.status {
             AgentTranscriptStatus::Pending => {
                 let status_message = turn.status_message.as_deref().unwrap_or("Working...");
@@ -743,6 +747,20 @@ pub fn render_transcript() -> String {
         }
     }
     rendered
+}
+
+fn set_transcript_agent_label(label: String) {
+    *AGENT_TRANSCRIPT_LABEL
+        .lock()
+        .expect("agent transcript label lock poisoned") = Some(label);
+}
+
+fn transcript_agent_label() -> String {
+    AGENT_TRANSCRIPT_LABEL
+        .lock()
+        .expect("agent transcript label lock poisoned")
+        .clone()
+        .unwrap_or_else(|| "Agent".to_string())
 }
 
 fn update_transcript_turn(id: u64, status: AgentTranscriptStatus, response: Option<String>) {
@@ -805,6 +823,31 @@ fn update_session_id(agent: &mut RunningAgent, message: &JsonRpcMessage) {
     };
 
     agent.session_id = Some(session_id.to_string());
+}
+
+fn update_agent_display_name(agent: &RunningAgent, message: &JsonRpcMessage) {
+    let JsonRpcMessage::Response(response) = message else {
+        return;
+    };
+
+    if !json_rpc_id_eq(&response.id, 1) {
+        return;
+    }
+
+    let label = response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("agentInfo"))
+        .and_then(|agent_info| {
+            agent_info
+                .get("title")
+                .and_then(Value::as_str)
+                .or_else(|| agent_info.get("name").and_then(Value::as_str))
+        })
+        .filter(|label| !label.trim().is_empty())
+        .unwrap_or(agent.name.as_str());
+
+    set_transcript_agent_label(label.trim().to_string());
 }
 
 fn session_new_failure_message(message: &JsonRpcMessage) -> Option<String> {

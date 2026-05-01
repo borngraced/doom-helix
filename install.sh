@@ -96,22 +96,16 @@ esac
 
 want_codex=0
 want_claude=0
-config_codex=0
-config_claude=0
 case "$selected_agent" in
   codex)
     want_codex=1
-    config_codex=1
     ;;
   claude)
     want_claude=1
-    config_claude=1
     ;;
   both)
     want_codex=1
     want_claude=1
-    config_codex=1
-    config_claude=1
     ;;
 esac
 
@@ -303,7 +297,7 @@ write_default_config() {
     echo "  $config_file"
     if [ "$selected_agent" != none ]; then
       echo "Selected agent backend '$selected_agent' was installed, but your existing config was not changed."
-      echo "Update [editor.agent].default-agent and [editor.agent.servers.*] if you want to switch backends."
+      echo "Update [editor.agent].name and [editor.agent].command if you want to switch backends."
     fi
     return
   fi
@@ -312,6 +306,10 @@ write_default_config() {
   default_agent=$selected_agent
   if [ "$default_agent" = both ]; then
     default_agent=codex
+  fi
+  agent_command=codex-acp
+  if [ "$default_agent" = claude ]; then
+    agent_command=$claude_acp_command
   fi
 
   {
@@ -324,7 +322,9 @@ write_default_config() {
     printf '%s\n' ''
     printf '%s\n' '[editor.agent]'
     printf '%s\n' 'enable = true'
-    printf 'default-agent = "%s"\n' "$default_agent"
+    printf 'name = "%s"\n' "$default_agent"
+    printf 'command = "%s"\n' "$agent_command"
+    printf '%s\n' 'args = []'
     printf '%s\n' 'panel-position = "right"'
     printf '%s\n' 'panel-size = 30'
     printf '%s\n' 'auto-context-on-open = true'
@@ -333,22 +333,6 @@ write_default_config() {
     printf '%s\n' 'include-visible-buffer = true'
     printf '%s\n' 'include-diagnostics = true'
     printf '%s\n' 'require-approval-for-shell = true'
-
-    if [ "$config_codex" = 1 ]; then
-      printf '%s\n' ''
-      printf '%s\n' '[editor.agent.servers.codex]'
-      printf '%s\n' 'transport = "stdio"'
-      printf '%s\n' 'command = "codex-acp"'
-      printf '%s\n' 'args = []'
-    fi
-
-    if [ "$config_claude" = 1 ]; then
-      printf '%s\n' ''
-      printf '%s\n' '[editor.agent.servers.claude]'
-      printf '%s\n' 'transport = "stdio"'
-      printf 'command = "%s"\n' "$claude_acp_command"
-      printf '%s\n' 'args = []'
-    fi
 
     printf '%s\n' ''
     printf '%s\n' '[keys.normal.space.a]'

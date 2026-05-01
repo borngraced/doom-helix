@@ -31,7 +31,8 @@ attached automatically.
 - Patch preview and confirmed `git apply` flow.
 - Apply failure diagnostics shown in editor buffers.
 - One managed agent panel to avoid message routing confusion.
-- Configurable panel position: `left`, `right`, `top`, or `bottom`.
+- Configurable and runtime-movable panel position: `left`, `right`, `top`, or
+  `bottom`.
 - Configurable and keyboard-resizable panel size with `<space>a +` and
   `<space>a -`.
 - Markdown transcript with selectable/copyable text and code fences.
@@ -53,6 +54,7 @@ Common commands:
 :agent apply         # confirm and apply latest patch
 :agent panel         # open/focus transcript panel
 :agent restore       # restore transcript panel
+:agent position left # move transcript panel
 :agent resize +5     # grow transcript panel
 :agent resize -5     # shrink transcript panel
 :agent status        # show agent runtime status
@@ -112,14 +114,11 @@ DOOMHELIX_AGENT=none sh install.sh
 ```toml
 [editor.agent]
 enable = true
-default-agent = "codex"
-panel-position = "right"
-panel-size = 30
-
-[editor.agent.servers.codex]
-transport = "stdio"
+name = "codex"
 command = "codex-acp"
 args = []
+panel-position = "right"
+panel-size = 30
 ```
 
 ## Agent Backend

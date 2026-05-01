@@ -37,6 +37,7 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "launch-config",
     "panel",
     "patch",
+    "position",
     "prev",
     "resize",
     "start",
@@ -45,6 +46,7 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
 ];
 static AGENT_PENDING_TURN_ID: AtomicU64 = AtomicU64::new(1);
 static AGENT_PANEL_SIZE_OVERRIDE: AtomicU16 = AtomicU16::new(0);
+static AGENT_PANEL_POSITION_OVERRIDE: AtomicU16 = AtomicU16::new(0);
 
 #[derive(Clone)]
 pub struct TypableCommand {
@@ -740,7 +742,7 @@ fn edit_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
 }
 
 fn open_agent_panel(cx: &mut compositor::Context, status: &'static str) {
-    let position = cx.editor.config().agent.panel_position;
+    let position = agent_panel_position(cx.editor);
     let action = agent_panel_action(position);
     let (doc_id, created) = agent_transcript_doc_id(cx.editor, action);
     let view_id = prepare_agent_transcript_doc(cx.editor, doc_id, action);
@@ -750,6 +752,26 @@ fn open_agent_panel(cx: &mut compositor::Context, status: &'static str) {
     resize_agent_panel(cx.editor, view_id);
     render_agent_transcript_editor(cx.editor, doc_id, view_id);
     cx.editor.set_status(status);
+}
+
+fn agent_panel_position(editor: &Editor) -> AgentPanelPosition {
+    match AGENT_PANEL_POSITION_OVERRIDE.load(Ordering::Relaxed) {
+        1 => AgentPanelPosition::Left,
+        2 => AgentPanelPosition::Right,
+        3 => AgentPanelPosition::Top,
+        4 => AgentPanelPosition::Bottom,
+        _ => editor.config().agent.panel_position,
+    }
+}
+
+fn set_agent_panel_position_override(position: AgentPanelPosition) {
+    let value = match position {
+        AgentPanelPosition::Left => 1,
+        AgentPanelPosition::Right => 2,
+        AgentPanelPosition::Top => 3,
+        AgentPanelPosition::Bottom => 4,
+    };
+    AGENT_PANEL_POSITION_OVERRIDE.store(value, Ordering::Relaxed);
 }
 
 fn clear_agent_panel(cx: &mut compositor::Context) {
@@ -939,7 +961,7 @@ fn agent_patch_apply_diagnostics(
     };
 
     format!(
-        "# Agent Patch Apply Failed\n\n{}\n\n## Apply Cwd\n\n`{}`\n\n## Original Codex Patch\n\n```diff\n{}\n```\n\n## Normalized Patch Sent To Git\n\n{}\n",
+        "# Agent Patch Apply Failed\n\n{}\n\n## Apply Cwd\n\n`{}`\n\n## Original Agent Patch\n\n```diff\n{}\n```\n\n## Normalized Patch Sent To Git\n\n{}\n",
         error,
         cwd.display(),
         original_patch.trim(),
@@ -1209,6 +1231,77 @@ fn resize_agent_panel_command(cx: &mut compositor::Context, args: Args) -> anyho
     Ok(())
 }
 
+fn position_agent_panel_command(cx: &mut compositor::Context, args: Args) -> anyhow::Result<()> {
+    let position_arg = args
+        .get(1)
+        .map(str::trim)
+        .filter(|arg| !arg.is_empty())
+        .context("agent position requires left, right, top, or bottom")?;
+    let position = parse_agent_panel_position(position_arg)?;
+    set_agent_panel_position_override(position);
+
+    let Some(doc_id) = crate::agent::runtime::transcript_doc_id()
+        .filter(|doc_id| cx.editor.document(*doc_id).is_some())
+    else {
+        cx.editor
+            .set_status(format!("Agent panel position set to {position_arg}"));
+        return Ok(());
+    };
+
+    move_agent_panel(cx.editor, doc_id, position);
+    cx.editor
+        .set_status(format!("Agent panel moved to {position_arg}"));
+    Ok(())
+}
+
+fn parse_agent_panel_position(position: &str) -> anyhow::Result<AgentPanelPosition> {
+    match position {
+        "left" | "l" => Ok(AgentPanelPosition::Left),
+        "right" | "r" => Ok(AgentPanelPosition::Right),
+        "top" | "t" => Ok(AgentPanelPosition::Top),
+        "bottom" | "b" => Ok(AgentPanelPosition::Bottom),
+        _ => anyhow::bail!("agent position must be left, right, top, or bottom"),
+    }
+}
+
+fn move_agent_panel(
+    editor: &mut Editor,
+    doc_id: helix_view::DocumentId,
+    position: AgentPanelPosition,
+) {
+    if let Some(view_id) = agent_transcript_view_id(editor, doc_id) {
+        let previous_doc_id = editor.tree.try_get(view_id).and_then(|view| {
+            view.docs_access_history
+                .iter()
+                .rev()
+                .copied()
+                .find(|prev_doc_id| {
+                    *prev_doc_id != doc_id && editor.document(*prev_doc_id).is_some()
+                })
+        });
+
+        if let Some(previous_doc_id) = previous_doc_id {
+            editor.tree.focus = view_id;
+            editor.switch(previous_doc_id, Action::Replace);
+        } else if editor.tree.views().count() > 1 {
+            editor.close(view_id);
+        } else {
+            resize_agent_panel(editor, view_id);
+            render_agent_transcript_editor(editor, doc_id, view_id);
+            return;
+        }
+    }
+
+    let action = agent_panel_action(position);
+    editor.switch(doc_id, action);
+    let view_id = view!(editor).id;
+    let doc = doc_mut!(editor, &doc_id);
+    doc.ensure_view_init(view_id);
+    place_agent_panel(editor, position);
+    resize_agent_panel(editor, view_id);
+    render_agent_transcript_editor(editor, doc_id, view_id);
+}
+
 fn agent_prompt_with_formatting(
     kind: crate::agent::runtime::AgentTranscriptKind,
     prompt: &str,
@@ -1257,6 +1350,7 @@ fn prompt_agent_turn(
     store_patch: bool,
 ) -> anyhow::Result<()> {
     let launch_config = cx.editor.config().agent.launch_config()?;
+    let agent_name = launch_config.name.clone();
     let handshake = crate::agent::acp::session_handshake(cx.editor)?;
     let snapshot = crate::agent::context::current_snapshot(cx.editor);
     let transcript_prompt = visible_agent_prompt(&snapshot, kind, prompt.trim());
@@ -1283,11 +1377,15 @@ fn prompt_agent_turn(
         let result = async {
             let started = crate::agent::runtime::ensure_started(launch_config, handshake).await?;
             let status = if started {
-                "Agent started; request sent to Codex..."
+                format!("Agent started; request sent to {agent_name}...")
             } else {
-                "Agent request sent to Codex..."
+                format!("Agent request sent to {agent_name}...")
             };
-            helix_event::status::report(status).await;
+            helix_event::status::report(helix_event::status::StatusMessage {
+                severity: helix_event::status::Severity::Info,
+                message: status.into(),
+            })
+            .await;
             let stream_pending_range = pending_range;
             let turn = crate::agent::runtime::send_prompt_turn_streaming(
                 prompt,
@@ -1457,7 +1555,7 @@ fn append_agent_pending_transcript_editor(
     kind: crate::agent::runtime::AgentTranscriptKind,
     prompt: &str,
 ) -> anyhow::Result<AgentPendingTurn> {
-    let position = editor.config().agent.panel_position;
+    let position = agent_panel_position(editor);
     let action = agent_panel_action(position);
     let (doc_id, created) = agent_transcript_doc_id(editor, action);
     let view_id = prepare_agent_transcript_doc(editor, doc_id, action);
@@ -1485,7 +1583,7 @@ fn replace_agent_pending_transcript_editor(
         return Ok(());
     }
 
-    let position = editor.config().agent.panel_position;
+    let position = agent_panel_position(editor);
     let action = agent_panel_action(position);
     let view_id = prepare_agent_transcript_doc(editor, pending_turn.doc_id, action);
     resize_agent_panel(editor, view_id);
@@ -1554,7 +1652,7 @@ fn fail_agent_pending_transcript_editor(
         return Ok(());
     }
 
-    let position = editor.config().agent.panel_position;
+    let position = agent_panel_position(editor);
     let action = agent_panel_action(position);
     let view_id = prepare_agent_transcript_doc(editor, pending_turn.doc_id, action);
     resize_agent_panel(editor, view_id);
@@ -2118,6 +2216,7 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
             Ok(())
         }
         Some("resize") => resize_agent_panel_command(cx, args),
+        Some("position") => position_agent_panel_command(cx, args),
         Some("clear") => {
             clear_agent_panel(cx);
             Ok(())

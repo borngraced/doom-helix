@@ -28,7 +28,8 @@ prompt.
 - One managed transcript panel per editor runtime.
 - Transcript restore after closing the panel.
 - Configurable panel position and initial size.
-- Keyboard panel resizing with `:agent resize`.
+- Runtime panel movement with `:agent position` and resizing with
+  `:agent resize`.
 - Markdown transcript that remains selectable and copyable.
 - `gd` on Markdown file links in the transcript opens the referenced file and
   line in a normal code split.
@@ -126,6 +127,12 @@ Moves the cursor to the next turn in the transcript.
 
 Moves the cursor to the previous turn in the transcript.
 
+`:agent position <left|right|top|bottom>`
+
+Moves the agent transcript panel for the current editor session. Runtime
+position changes are kept while the editor is running; `panel-position` remains
+the startup/default position.
+
 `:agent resize <size|+delta|-delta>`
 
 Resizes only the agent transcript panel for the current editor session.
@@ -212,7 +219,9 @@ Minimal Codex config:
 ```toml
 [editor.agent]
 enable = true
-default-agent = "codex"
+name = "codex"
+command = "codex-acp"
+args = []
 panel-position = "right"
 panel-size = 30
 auto-context-on-open = true
@@ -221,11 +230,6 @@ include-command-history = true
 include-visible-buffer = true
 include-diagnostics = true
 require-approval-for-shell = true
-
-[editor.agent.servers.codex]
-transport = "stdio"
-command = "codex-acp"
-args = []
 ```
 
 Minimal Claude config:
@@ -233,14 +237,11 @@ Minimal Claude config:
 ```toml
 [editor.agent]
 enable = true
-default-agent = "claude"
-panel-position = "right"
-panel-size = 30
-
-[editor.agent.servers.claude]
-transport = "stdio"
+name = "claude"
 command = "claude-code-acp"
 args = []
+panel-position = "right"
+panel-size = 30
 ```
 
 `panel-position` supports:
@@ -260,15 +261,17 @@ resizes through `:agent resize` apply only to the current editor session.
 ACP servers can use stdio or WebSocket transport.
 
 ```toml
-[editor.agent.servers.codex-ws]
-transport = "websocket"
+[editor.agent]
+enable = true
+name = "codex"
 url = "ws://127.0.0.1:9000/acp"
 command = "codex-acp"
 args = ["--websocket", "127.0.0.1:9000"]
 ```
 
 For WebSocket servers, DoomHelix starts `command` when provided, then connects
-to `url`. Each WebSocket text or binary frame carries one ACP JSON-RPC message.
+to `url`. `transport` is inferred: `command` alone uses stdio, and `url` uses
+WebSocket. Each WebSocket text or binary frame carries one ACP JSON-RPC message.
 
 ## Suggested Keymap
 

@@ -441,7 +441,12 @@ pub struct Config {
 #[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
 pub struct AgentConfig {
     pub enable: bool,
+    pub name: String,
     pub default_agent: String,
+    pub transport: AgentTransport,
+    pub command: String,
+    pub args: Vec<String>,
+    pub url: String,
     pub panel_position: AgentPanelPosition,
     pub panel_size: u16,
     pub auto_context_on_open: bool,
@@ -495,27 +500,79 @@ impl AgentConfig {
             anyhow::bail!("agent integration is disabled; set editor.agent.enable = true");
         }
 
+        if self.inline_launch_configured() {
+            let transport = self.inferred_inline_transport();
+            self.validate_launch_target(
+                self.name.as_str(),
+                transport,
+                self.command.as_str(),
+                self.url.as_str(),
+            )?;
+
+            return Ok(AgentLaunchConfig {
+                name: self.name.clone(),
+                transport,
+                command: self.command.clone(),
+                args: self.args.clone(),
+                url: self.url.clone(),
+            });
+        }
+
         let server = self.servers.get(&self.default_agent).ok_or_else(|| {
             anyhow::anyhow!("agent server '{}' is not configured", self.default_agent)
         })?;
+        let transport = Self::inferred_transport(server.transport, server.url.as_str());
 
-        match server.transport {
-            AgentTransport::Stdio if server.command.trim().is_empty() => {
-                anyhow::bail!("agent server '{}' has an empty command", self.default_agent);
-            }
-            AgentTransport::Websocket if server.url.trim().is_empty() => {
-                anyhow::bail!("agent server '{}' has an empty url", self.default_agent);
-            }
-            _ => {}
-        }
+        self.validate_launch_target(
+            self.default_agent.as_str(),
+            transport,
+            server.command.as_str(),
+            server.url.as_str(),
+        )?;
 
         Ok(AgentLaunchConfig {
             name: self.default_agent.clone(),
-            transport: server.transport,
+            transport,
             command: server.command.clone(),
             args: server.args.clone(),
             url: server.url.clone(),
         })
+    }
+
+    fn inline_launch_configured(&self) -> bool {
+        !self.command.trim().is_empty() || !self.url.trim().is_empty()
+    }
+
+    fn inferred_inline_transport(&self) -> AgentTransport {
+        Self::inferred_transport(self.transport, self.url.as_str())
+    }
+
+    fn inferred_transport(configured: AgentTransport, url: &str) -> AgentTransport {
+        if !url.trim().is_empty() {
+            AgentTransport::Websocket
+        } else {
+            configured
+        }
+    }
+
+    fn validate_launch_target(
+        &self,
+        name: &str,
+        transport: AgentTransport,
+        command: &str,
+        url: &str,
+    ) -> anyhow::Result<()> {
+        match transport {
+            AgentTransport::Stdio if command.trim().is_empty() => {
+                anyhow::bail!("agent '{name}' has an empty command");
+            }
+            AgentTransport::Websocket if url.trim().is_empty() => {
+                anyhow::bail!("agent '{name}' has an empty url");
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 }
 
@@ -523,7 +580,12 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             enable: false,
+            name: "codex".to_string(),
             default_agent: "codex".to_string(),
+            transport: AgentTransport::Stdio,
+            command: String::new(),
+            args: Vec::new(),
+            url: String::new(),
             panel_position: AgentPanelPosition::Right,
             panel_size: 30,
             auto_context_on_open: true,
@@ -2691,6 +2753,42 @@ mod agent_config_tests {
         assert_eq!(launch.transport, AgentTransport::Stdio);
         assert_eq!(launch.command, "agent");
         assert_eq!(launch.args, ["--acp"]);
+    }
+
+    #[test]
+    fn resolves_inline_launch_config() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            enable = true
+            name = "claude"
+            command = "claude-code-acp"
+            args = []
+            "#,
+        )
+        .unwrap();
+
+        let launch = config.launch_config().unwrap();
+        assert_eq!(launch.name, "claude");
+        assert_eq!(launch.transport, AgentTransport::Stdio);
+        assert_eq!(launch.command, "claude-code-acp");
+        assert!(launch.args.is_empty());
+    }
+
+    #[test]
+    fn resolves_inline_websocket_launch_config() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            enable = true
+            name = "codex"
+            url = "ws://127.0.0.1:9000/acp"
+            "#,
+        )
+        .unwrap();
+
+        let launch = config.launch_config().unwrap();
+        assert_eq!(launch.name, "codex");
+        assert_eq!(launch.transport, AgentTransport::Websocket);
+        assert_eq!(launch.url, "ws://127.0.0.1:9000/acp");
     }
 
     #[test]
