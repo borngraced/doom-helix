@@ -309,6 +309,16 @@ async fn prompt_acp_permission(params: Option<Value>) -> anyhow::Result<String> 
         })
         .unwrap_or("Approve agent tool call?");
     let body = acp_permission_body(&params);
+    let (allow_option, reject_option) = acp_permission_choices(&params);
+    let accepted = prompt_yes_no(title, body).await?;
+    Ok(if accepted {
+        allow_option
+    } else {
+        reject_option
+    })
+}
+
+fn acp_permission_choices(params: &Value) -> (String, String) {
     let options = params
         .get("options")
         .and_then(Value::as_array)
@@ -319,12 +329,8 @@ async fn prompt_acp_permission(params: Option<Value>) -> anyhow::Result<String> 
         .unwrap_or_else(|| "allow".to_string());
     let reject_option =
         acp_permission_option(&options, false).unwrap_or_else(|| "deny".to_string());
-    let accepted = prompt_yes_no(title, body).await?;
-    Ok(if accepted {
-        allow_option
-    } else {
-        reject_option
-    })
+
+    (allow_option, reject_option)
 }
 
 fn acp_permission_option(options: &[Value], allow: bool) -> Option<String> {
@@ -883,7 +889,7 @@ fn preferred_session_mode(result: &Value) -> Option<String> {
 }
 
 fn preferred_mode_value(values: &[String], current: Option<&str>) -> Option<String> {
-    const PREFERRED_APPROVAL_MODES: &[&str] = &["suggest", "ask"];
+    const PREFERRED_APPROVAL_MODES: &[&str] = &["read-only", "suggest", "ask"];
     for preferred in PREFERRED_APPROVAL_MODES {
         if values.iter().any(|value| value == preferred) && current != Some(*preferred) {
             return Some((*preferred).to_string());
@@ -900,7 +906,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prefers_suggest_config_mode() {
+    fn falls_back_to_suggest_config_mode() {
         let result = json!({
             "configOptions": [
                 {
@@ -908,7 +914,6 @@ mod tests {
                     "category": "mode",
                     "currentValue": "full-auto",
                     "options": [
-                        { "value": "read-only" },
                         { "value": "suggest" },
                         { "value": "auto-edit" },
                         { "value": "full-auto" }
@@ -920,6 +925,29 @@ mod tests {
         assert_eq!(
             preferred_config_mode(&result),
             Some(("mode".to_string(), "suggest".to_string()))
+        );
+    }
+
+    #[test]
+    fn prefers_read_only_codex_config_mode() {
+        let result = json!({
+            "configOptions": [
+                {
+                    "id": "mode",
+                    "category": "mode",
+                    "currentValue": "auto",
+                    "options": [
+                        { "value": "read-only" },
+                        { "value": "auto" },
+                        { "value": "full-access" }
+                    ]
+                }
+            ]
+        });
+
+        assert_eq!(
+            preferred_config_mode(&result),
+            Some(("mode".to_string(), "read-only".to_string()))
         );
     }
 
@@ -936,5 +964,48 @@ mod tests {
         });
 
         assert_eq!(preferred_session_mode(&result), Some("ask".to_string()));
+    }
+
+    #[test]
+    fn maps_acp_permission_options_to_allow_and_deny_choices() {
+        let params = json!({
+            "sessionId": "session-1",
+            "toolCall": {
+                "toolCallId": "call-1",
+                "title": "Edit src/main.rs",
+                "kind": "edit",
+                "status": "pending"
+            },
+            "options": [
+                {
+                    "optionId": "approved",
+                    "name": "Yes, proceed",
+                    "kind": "allow_once"
+                },
+                {
+                    "optionId": "approved-for-session",
+                    "name": "Yes, and don't ask again",
+                    "kind": "allow_always"
+                },
+                {
+                    "optionId": "denied",
+                    "name": "No, continue without running",
+                    "kind": "reject_once"
+                }
+            ]
+        });
+
+        assert_eq!(
+            acp_permission_choices(&params),
+            ("approved".to_string(), "denied".to_string())
+        );
+    }
+
+    #[test]
+    fn acp_permission_options_have_stable_fallbacks() {
+        assert_eq!(
+            acp_permission_choices(&json!({})),
+            ("allow".to_string(), "deny".to_string())
+        );
     }
 }
