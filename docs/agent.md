@@ -163,8 +163,6 @@ Use `codex-acp` for Codex. It is the supported adapter for real ACP permission p
 
 When Codex requests command execution or file changes, `codex-acp` sends `session/request_permission` to DoomHelix. DoomHelix shows a `[y/N]` prompt with the request details and returns the selected ACP permission option.
 
-`doomhelix-codex-agent` remains available as a legacy/debug adapter when installed with `DOOMHELIX_INSTALL_LEGACY_CODEX_AGENT=1`, but it is not the default Codex backend.
-
 ## Suggested Keymap
 
 Add local bindings for the common agent actions:

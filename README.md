@@ -49,7 +49,6 @@ The installer builds from source and installs:
 
 Override paths with `DOOMHELIX_PREFIX`, `DOOMHELIX_BIN_DIR`, or
 `DOOMHELIX_RUNTIME_DIR`.
-Install the legacy DoomHelix Codex adapter with `DOOMHELIX_INSTALL_LEGACY_CODEX_AGENT=1`.
 
 ## Upstream
 
