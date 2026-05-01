@@ -40,11 +40,12 @@ Stops the registered agent process and clears the runtime slot.
 
 `:agent recv`
 
-Reads one framed JSON-RPC message from the running agent process and opens it in a JSON scratch buffer.
+Reads one framed JSON-RPC message from the running agent process and opens it in a JSON scratch buffer. Run this until `:agent status` shows a real session id instead of `<pending>`; many ACP servers reply to `initialize` before replying to `session/new`.
+If the agent exits before sending a response, Helix reports the process exit status and any stderr output it can capture.
 
 `:agent prompt <text>`
 
-Sends a `session/prompt` request to the running agent. After `:agent start`, run `:agent recv` once to capture the `session/new` response and session id before sending prompts.
+Sends a `session/prompt` request to the running agent. The prompt includes a fresh Helix context snapshot under `_meta.helix.context`, so the agent sees the active file, cursor, selections, theme, mode, diagnostics, LSP servers, Git state, and recent commands at send time. After `:agent start`, run `:agent recv` until `:agent status` shows a real session id before sending prompts.
 
 `:agent-context`
 

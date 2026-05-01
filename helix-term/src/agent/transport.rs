@@ -1,9 +1,10 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::process::Stdio;
+use std::{process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
+    time::timeout,
 };
 
 use super::{acp, session};
@@ -71,6 +72,31 @@ impl AgentProcess {
 
     pub async fn recv<T: DeserializeOwned>(&mut self) -> anyhow::Result<T> {
         read_content_length_message(&mut self.stdout).await
+    }
+
+    pub fn try_wait(&mut self) -> anyhow::Result<Option<std::process::ExitStatus>> {
+        Ok(self.child.try_wait()?)
+    }
+
+    pub async fn stderr_snapshot(&mut self) -> anyhow::Result<Option<String>> {
+        let Some(stderr) = self.stderr.as_mut() else {
+            return Ok(None);
+        };
+
+        let mut output = String::new();
+        let read = timeout(
+            Duration::from_millis(100),
+            stderr.read_to_string(&mut output),
+        )
+        .await;
+        match read {
+            Ok(result) => {
+                result?;
+                let output = output.trim().to_string();
+                Ok((!output.is_empty()).then_some(output))
+            }
+            Err(_) => Ok(None),
+        }
     }
 
     pub fn stdout(&mut self) -> &mut BufReader<ChildStdout> {

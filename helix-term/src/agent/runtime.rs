@@ -1,5 +1,6 @@
 use helix_event::runtime_local;
 use helix_view::editor::AgentLaunchConfig;
+use serde_json::Value;
 use std::sync::Mutex;
 
 use super::{
@@ -56,27 +57,47 @@ pub async fn recv_next() -> anyhow::Result<JsonRpcMessage> {
         anyhow::bail!("no agent is running");
     };
 
-    let message = running.process.recv().await;
-    if let Ok(message) = &message {
-        update_session_id(&mut running, message);
+    match running.process.recv().await {
+        Ok(message) => {
+            update_session_id(&mut running, &message);
+            restore_running_agent(running);
+            Ok(message)
+        }
+        Err(err) => {
+            let exit_status = running.process.try_wait()?;
+            let stderr = running.process.stderr_snapshot().await?;
+            if exit_status.is_none() {
+                restore_running_agent(running);
+            }
+
+            let mut message = format!("failed to read agent message: {err}");
+            if let Some(status) = exit_status {
+                message.push_str(&format!("; process exited with {status}"));
+            }
+            if let Some(stderr) = stderr {
+                message.push_str(&format!("; stderr: {stderr}"));
+            }
+
+            anyhow::bail!(message);
+        }
     }
-    restore_running_agent(running);
-    message
 }
 
-pub async fn send_prompt(prompt: String) -> anyhow::Result<u64> {
+pub async fn send_prompt(prompt: String, meta: Option<Value>) -> anyhow::Result<u64> {
     let Some(mut running) = take_running_agent() else {
         anyhow::bail!("no agent is running");
     };
 
     let Some(session_id) = running.session_id.clone() else {
         restore_running_agent(running);
-        anyhow::bail!("agent session id is not known yet; run :agent recv after :agent start");
+        anyhow::bail!(
+            "agent session id is not known yet; run :agent recv until :agent status shows a session"
+        );
     };
 
     let request_id = running.next_request_id;
     running.next_request_id += 1;
-    let request = super::acp::prompt_request(request_id, session_id, prompt)?;
+    let request = super::acp::prompt_request(request_id, session_id, prompt, meta)?;
     let send_result = running.process.send(&request).await;
     restore_running_agent(running);
     send_result?;

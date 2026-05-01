@@ -107,6 +107,8 @@ pub struct NewSessionParams {
 pub struct PromptParams {
     pub session_id: String,
     pub prompt: Vec<ContentBlock>,
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -159,6 +161,7 @@ pub fn prompt_request(
     id: u64,
     session_id: String,
     prompt: String,
+    meta: Option<Value>,
 ) -> anyhow::Result<JsonRpcRequest> {
     Ok(JsonRpcRequest {
         jsonrpc: "2.0",
@@ -167,6 +170,7 @@ pub fn prompt_request(
         params: serde_json::to_value(PromptParams {
             session_id,
             prompt: vec![ContentBlock::Text { text: prompt }],
+            meta,
         })?,
     })
 }
@@ -190,4 +194,34 @@ pub fn session_handshake_pretty(editor: &helix_view::Editor) -> anyhow::Result<S
         .collect::<Result<Vec<_>, _>>()?;
 
     pretty_json(&messages)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_request_includes_meta_when_present() {
+        let request = prompt_request(
+            7,
+            "session-1".to_string(),
+            "explain this file".to_string(),
+            Some(json!({
+                "helix": {
+                    "context": {
+                        "theme": "base16_default"
+                    }
+                }
+            })),
+        )
+        .unwrap();
+
+        assert_eq!(request.method, "session/prompt");
+        assert_eq!(request.params["sessionId"], "session-1");
+        assert_eq!(request.params["prompt"][0]["text"], "explain this file");
+        assert_eq!(
+            request.params["_meta"]["helix"]["context"]["theme"],
+            "base16_default"
+        );
+    }
 }

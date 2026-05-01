@@ -628,24 +628,39 @@ fn recv_agent(cx: &mut compositor::Context) {
     cx.jobs.callback(async move {
         let message = crate::agent::runtime::recv_next().await?;
         let contents = serde_json::to_string_pretty(&message)?;
+        let status = agent_status_message();
         Ok(job::Callback::Editor(Box::new(move |editor| {
             if let Err(err) = open_agent_json_scratch_editor(editor, contents) {
                 editor.set_error(err.to_string());
+            } else {
+                editor.set_status(status);
             }
         })))
     });
 }
 
-fn prompt_agent(cx: &mut compositor::Context, prompt: String) {
+fn prompt_agent(cx: &mut compositor::Context, prompt: String) -> anyhow::Result<()> {
+    let meta = serde_json::json!({
+        "helix": {
+            "context": crate::agent::context::current_snapshot(cx.editor),
+        }
+    });
+
     cx.jobs.callback(async move {
-        let request_id = crate::agent::runtime::send_prompt(prompt).await?;
+        let request_id = crate::agent::runtime::send_prompt(prompt, Some(meta)).await?;
         Ok(job::Callback::Editor(Box::new(move |editor| {
             editor.set_status(format!("Sent agent prompt request #{request_id}"));
         })))
     });
+
+    Ok(())
 }
 
 fn show_agent_status(cx: &mut compositor::Context) {
+    cx.editor.set_status(agent_status_message());
+}
+
+fn agent_status_message() -> String {
     match crate::agent::runtime::status() {
         crate::agent::runtime::AgentRuntimeStatus::Running {
             name,
@@ -653,13 +668,9 @@ fn show_agent_status(cx: &mut compositor::Context) {
             next_request_id,
         } => {
             let session = session_id.as_deref().unwrap_or("<pending>");
-            cx.editor.set_status(format!(
-                "Agent '{name}' is running, session {session}, next request #{next_request_id}"
-            ));
+            format!("Agent '{name}' is running, session {session}, next request #{next_request_id}")
         }
-        crate::agent::runtime::AgentRuntimeStatus::Stopped => {
-            cx.editor.set_status("No agent is running");
-        }
+        crate::agent::runtime::AgentRuntimeStatus::Stopped => "No agent is running".to_string(),
     }
 }
 
@@ -706,8 +717,7 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
                 .map(str::trim)
                 .filter(|prompt| !prompt.is_empty())
                 .context("agent prompt requires text")?;
-            prompt_agent(cx, prompt.to_string());
-            Ok(())
+            prompt_agent(cx, prompt.to_string())
         }
         Some("status") => {
             show_agent_status(cx);
