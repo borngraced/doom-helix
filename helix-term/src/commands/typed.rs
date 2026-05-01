@@ -582,11 +582,8 @@ fn open_agent_request(cx: &mut compositor::Context, prompt: &str) -> anyhow::Res
 }
 
 fn open_agent_session(cx: &mut compositor::Context) -> anyhow::Result<()> {
-    open_agent_json_scratch(
-        cx,
-        "{\n  \"schema_version\": 1,\n  \"kind\": \"session\",\n  \"status\": \"not_started\"\n}\n"
-            .to_string(),
-    )
+    let session = crate::agent::session::new_session_pretty(cx.editor)?;
+    open_agent_json_scratch(cx, session)
 }
 
 fn open_agent_json_scratch(cx: &mut compositor::Context, contents: String) -> anyhow::Result<()> {

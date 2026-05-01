@@ -16,7 +16,7 @@ Same as `:agent`. This exists as the explicit subcommand form.
 
 `:agent new`
 
-Opens a placeholder agent session scratch buffer.
+Opens a new agent session scratch buffer. The session currently contains a generated session id, initial status, a system message, and the full editor context.
 
 `:agent-context`
 
@@ -24,7 +24,7 @@ Compatibility command that opens the same context snapshot directly.
 
 `:agent-new`
 
-Compatibility command that opens the same placeholder session buffer directly.
+Compatibility command that opens the same new session buffer directly.
 
 `:agent ask <prompt>`
 
