@@ -1,7 +1,7 @@
 use serde::Serialize;
 use serde_json::Value;
 
-use super::session::AgentSession;
+use super::session::{self, AgentSession};
 
 pub const ACP_PROTOCOL_VERSION: u32 = 1;
 
@@ -71,4 +71,15 @@ pub fn initialized_notification() -> JsonRpcNotification {
 
 pub fn pretty_json<T: Serialize>(value: &T) -> anyhow::Result<String> {
     Ok(serde_json::to_string_pretty(value)?)
+}
+
+pub fn session_handshake_pretty(editor: &helix_view::Editor) -> anyhow::Result<String> {
+    let session = session::new_session(editor);
+    let messages = [
+        serde_json::to_value(initialize_request(1)?)?,
+        serde_json::to_value(initialized_notification())?,
+        serde_json::to_value(new_session_request(2, session)?)?,
+    ];
+
+    pretty_json(&messages)
 }

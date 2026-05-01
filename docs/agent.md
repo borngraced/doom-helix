@@ -18,6 +18,10 @@ Same as `:agent`. This exists as the explicit subcommand form.
 
 Opens a new agent session scratch buffer. The session currently contains a generated session id, initial status, a system message, and the full editor context.
 
+`:agent acp`
+
+Opens a dry-run ACP handshake payload as JSON. The payload currently previews the `initialize`, `initialized`, and `session/new` messages Helix would send to an ACP-compatible agent process.
+
 `:agent-context`
 
 Compatibility command that opens the same context snapshot directly.
