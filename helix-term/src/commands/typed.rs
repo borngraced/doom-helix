@@ -573,13 +573,22 @@ fn new_file(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> an
 
 fn open_agent_context(cx: &mut compositor::Context) -> anyhow::Result<()> {
     let snapshot = crate::agent::context::current_snapshot_pretty(cx.editor)?;
+    open_agent_json_scratch(cx, snapshot)
+}
+
+fn open_agent_request(cx: &mut compositor::Context, prompt: &str) -> anyhow::Result<()> {
+    let request = crate::agent::context::current_request_pretty(cx.editor, prompt)?;
+    open_agent_json_scratch(cx, request)
+}
+
+fn open_agent_json_scratch(cx: &mut compositor::Context, contents: String) -> anyhow::Result<()> {
     let doc_id = cx.editor.new_file(Action::HorizontalSplit);
     let view_id = view!(cx.editor).id;
     let loader = cx.editor.syn_loader.load();
     let doc = doc_mut!(cx.editor, &doc_id);
     doc.ensure_view_init(view_id);
     let selection = Selection::point(0);
-    let transaction = Transaction::insert(doc.text(), &selection, snapshot.into());
+    let transaction = Transaction::insert(doc.text(), &selection, contents.into());
     doc.apply(&transaction, view_id);
     doc.set_language_by_language_id("json", &loader).ok();
 
@@ -593,6 +602,14 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
 
     match args.first() {
         None | Some("context") => open_agent_context(cx),
+        Some("ask") => {
+            let prompt = args
+                .get(1)
+                .map(str::trim)
+                .filter(|prompt| !prompt.is_empty())
+                .context("agent ask requires a prompt")?;
+            open_agent_request(cx, prompt)
+        }
         Some(command) => bail!("unknown agent command: {command}"),
     }
 }
@@ -3149,7 +3166,8 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         fun: agent,
         completer: CommandCompleter::none(),
         signature: Signature {
-            positionals: (0, Some(1)),
+            positionals: (0, None),
+            raw_after: Some(1),
             ..Signature::DEFAULT
         },
     },

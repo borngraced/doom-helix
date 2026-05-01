@@ -9,6 +9,14 @@ const MAX_RECENT_COMMANDS: usize = 20;
 const MAX_CHANGED_FILES: usize = 100;
 
 #[derive(Debug, Serialize)]
+pub struct AgentRequest {
+    pub schema_version: u32,
+    pub kind: &'static str,
+    pub prompt: String,
+    pub context: EditorSnapshot,
+}
+
+#[derive(Debug, Serialize)]
 pub struct EditorSnapshot {
     pub workspace_root: String,
     pub cwd: String,
@@ -227,6 +235,17 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
 
 pub fn current_snapshot_pretty(editor: &Editor) -> anyhow::Result<String> {
     Ok(serde_json::to_string_pretty(&current_snapshot(editor))?)
+}
+
+pub fn current_request_pretty(editor: &Editor, prompt: &str) -> anyhow::Result<String> {
+    let request = AgentRequest {
+        schema_version: 1,
+        kind: "ask",
+        prompt: prompt.to_string(),
+        context: current_snapshot(editor),
+    };
+
+    Ok(serde_json::to_string_pretty(&request)?)
 }
 
 fn git_snapshot(
