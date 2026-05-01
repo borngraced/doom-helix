@@ -17,6 +17,10 @@ pub async fn start(
     launch_config: AgentLaunchConfig,
     handshake: Vec<JsonRpcRequest>,
 ) -> anyhow::Result<()> {
+    if let Some(mut running) = take_running_agent() {
+        running.process.kill().await?;
+    }
+
     let mut process = AgentProcess::spawn(&launch_config).await?;
     for message in handshake {
         process.send(&message).await?;
@@ -32,17 +36,17 @@ pub async fn start(
 }
 
 pub async fn stop() -> anyhow::Result<Option<String>> {
-    let running = {
-        let mut agent = AGENT_RUNTIME.lock().expect("agent runtime lock poisoned");
-        agent.take()
-    };
-
-    let Some(mut running) = running else {
+    let Some(mut running) = take_running_agent() else {
         return Ok(None);
     };
 
     running.process.kill().await?;
     Ok(Some(running.name))
+}
+
+fn take_running_agent() -> Option<RunningAgent> {
+    let mut agent = AGENT_RUNTIME.lock().expect("agent runtime lock poisoned");
+    agent.take()
 }
 
 pub fn status() -> AgentRuntimeStatus {
