@@ -1,4 +1,65 @@
 use serde::Serialize;
+use std::process::Stdio;
+use tokio::{
+    io::{AsyncWriteExt, BufReader, BufWriter},
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
+};
+
+use super::config::AgentLaunchConfig;
+
+pub struct AgentProcess {
+    child: Child,
+    stdin: BufWriter<ChildStdin>,
+    stdout: BufReader<ChildStdout>,
+    stderr: Option<BufReader<ChildStderr>>,
+}
+
+impl AgentProcess {
+    pub async fn spawn(config: &AgentLaunchConfig) -> anyhow::Result<Self> {
+        let mut child = Command::new(&config.command)
+            .args(&config.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("agent process stdin is unavailable"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("agent process stdout is unavailable"))?;
+        let stderr = child.stderr.take().map(BufReader::new);
+
+        Ok(Self {
+            child,
+            stdin: BufWriter::new(stdin),
+            stdout: BufReader::new(stdout),
+            stderr,
+        })
+    }
+
+    pub async fn send<T: Serialize>(&mut self, message: &T) -> anyhow::Result<()> {
+        let frame = encode_content_length_message(message)?;
+        self.stdin.write_all(&frame).await?;
+        self.stdin.flush().await?;
+        Ok(())
+    }
+
+    pub fn stdout(&mut self) -> &mut BufReader<ChildStdout> {
+        &mut self.stdout
+    }
+
+    pub fn stderr(&mut self) -> Option<&mut BufReader<ChildStderr>> {
+        self.stderr.as_mut()
+    }
+
+    pub async fn wait(&mut self) -> anyhow::Result<std::process::ExitStatus> {
+        Ok(self.child.wait().await?)
+    }
+}
 
 pub fn encode_content_length_message<T: Serialize>(message: &T) -> anyhow::Result<Vec<u8>> {
     let body = serde_json::to_string(message)?;
