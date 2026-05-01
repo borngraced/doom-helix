@@ -31,6 +31,7 @@ struct StdioAgentProcess {
 struct WebSocketAgentProcess {
     stream: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
     child: Option<Child>,
+    stderr: Option<BufReader<ChildStderr>>,
 }
 
 impl AgentProcess {
@@ -88,7 +89,7 @@ impl AgentProcess {
     pub async fn stderr_snapshot(&mut self) -> anyhow::Result<Option<String>> {
         match &mut self.inner {
             AgentConnection::Stdio(process) => process.stderr_snapshot().await,
-            AgentConnection::WebSocket(_) => Ok(None),
+            AgentConnection::WebSocket(process) => process.stderr_snapshot().await,
         }
     }
 
@@ -175,20 +176,21 @@ impl WebSocketAgentProcess {
             return Ok(Self {
                 stream,
                 child: None,
+                stderr: None,
             });
         }
 
-        let child = if config.command.trim().is_empty() {
-            None
+        let (mut child, mut stderr) = if config.command.trim().is_empty() {
+            (None, None)
         } else {
-            Some(
-                Command::new(&config.command)
-                    .args(&config.args)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()?,
-            )
+            let mut child = Command::new(&config.command)
+                .args(&config.args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()?;
+            let stderr = child.stderr.take().map(BufReader::new);
+            (Some(child), stderr)
         };
 
         let retry_until = child
@@ -197,12 +199,39 @@ impl WebSocketAgentProcess {
 
         loop {
             match Self::connect_once(&config.url).await {
-                Ok(stream) => return Ok(Self { stream, child }),
+                Ok(stream) => {
+                    return Ok(Self {
+                        stream,
+                        child,
+                        stderr,
+                    })
+                }
                 Err(err) if retry_until.is_some_and(|deadline| Instant::now() < deadline) => {
                     sleep(Duration::from_millis(50)).await;
                     let _ = err;
                 }
-                Err(err) => return Err(err),
+                Err(err) => {
+                    let mut message = format!("failed to connect agent websocket: {err}");
+                    if let Some(stderr) = stderr.as_mut() {
+                        let mut output = String::new();
+                        if timeout(
+                            Duration::from_millis(100),
+                            stderr.read_to_string(&mut output),
+                        )
+                        .await
+                        .is_ok_and(|result| result.is_ok())
+                        {
+                            let output = output.trim();
+                            if !output.is_empty() {
+                                message.push_str(&format!("; stderr: {output}"));
+                            }
+                        }
+                    }
+                    if let Some(child) = child.as_mut() {
+                        let _ = child.kill().await;
+                    }
+                    return Err(anyhow::anyhow!(message));
+                }
             }
         }
     }
@@ -250,6 +279,27 @@ impl WebSocketAgentProcess {
             child.kill().await?;
         }
         Ok(())
+    }
+
+    async fn stderr_snapshot(&mut self) -> anyhow::Result<Option<String>> {
+        let Some(stderr) = self.stderr.as_mut() else {
+            return Ok(None);
+        };
+
+        let mut output = String::new();
+        let read = timeout(
+            Duration::from_millis(100),
+            stderr.read_to_string(&mut output),
+        )
+        .await;
+        match read {
+            Ok(result) => {
+                result?;
+                let output = output.trim().to_string();
+                Ok((!output.is_empty()).then_some(output))
+            }
+            Err(_) => Ok(None),
+        }
     }
 }
 
