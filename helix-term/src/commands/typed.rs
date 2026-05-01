@@ -1666,7 +1666,98 @@ fn agent_turn_response_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyh
         return Ok(serde_json::to_string_pretty(turn)?);
     }
 
-    Ok(response.trim().to_string())
+    Ok(normalize_agent_markdown_fence_languages(response.trim()))
+}
+
+fn normalize_agent_markdown_fence_languages(markdown: &str) -> String {
+    let mut normalized = String::with_capacity(markdown.len());
+    let mut in_fence = false;
+
+    for line in markdown.split_inclusive('\n') {
+        let (line, line_ending) = line
+            .strip_suffix('\n')
+            .map_or((line, ""), |line| (line, "\n"));
+
+        if let Some((rewritten, toggles_fence)) =
+            normalize_agent_markdown_fence_line(line, in_fence)
+        {
+            normalized.push_str(&rewritten);
+            if toggles_fence {
+                in_fence = !in_fence;
+            }
+        } else {
+            normalized.push_str(line);
+        }
+        normalized.push_str(line_ending);
+    }
+
+    normalized
+}
+
+fn normalize_agent_markdown_fence_line(line: &str, in_fence: bool) -> Option<(String, bool)> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("```")?;
+
+    if rest.starts_with('`') {
+        return None;
+    }
+
+    if in_fence {
+        return rest.trim().is_empty().then(|| (line.to_string(), true));
+    }
+
+    let Some(language) = rest
+        .split_whitespace()
+        .next()
+        .and_then(normalize_agent_markdown_fence_language)
+    else {
+        return Some((line.to_string(), true));
+    };
+
+    let prefix_len = line.len() - trimmed.len();
+    Some((format!("{}```{language}", &line[..prefix_len]), true))
+}
+
+fn normalize_agent_markdown_fence_language(language: &str) -> Option<String> {
+    let language = language
+        .strip_prefix("{.")
+        .and_then(|language| language.split('}').next())
+        .unwrap_or(language);
+    let language = language
+        .strip_prefix("language-")
+        .unwrap_or(language)
+        .trim_matches(|ch: char| {
+            !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '+' | '-' | '_' | '.'))
+        });
+
+    match language {
+        "" => None,
+        "golang" => Some("go".to_string()),
+        "shell" | "sh" => Some("bash".to_string()),
+        "plaintext" | "plain" => Some("text".to_string()),
+        "patch" => Some("diff".to_string()),
+        _ => Some(language.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod agent_markdown_tests {
+    use super::normalize_agent_markdown_fence_languages;
+
+    #[test]
+    fn normalizes_noisy_code_fence_languages() {
+        let input = "Before\n\n```go!\nprintln(\"x\")\n```\n\n```shell session\nls\n```";
+        let expected = "Before\n\n```go\nprintln(\"x\")\n```\n\n```bash\nls\n```";
+
+        assert_eq!(normalize_agent_markdown_fence_languages(input), expected);
+    }
+
+    #[test]
+    fn preserves_unlabeled_code_fences() {
+        let input = "```\n```go!\n```";
+
+        assert_eq!(normalize_agent_markdown_fence_languages(input), input);
+    }
 }
 
 fn extract_agent_patch(response: &str) -> Option<String> {
