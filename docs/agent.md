@@ -1,8 +1,8 @@
 # Agent Integration
 
-This is an experimental fork-only surface for exploring editor-native coding agents in Helix.
+This is an experimental DoomHelix surface for exploring editor-native coding agents.
 
-The agent process is intentionally read-only. Codex can explain code and propose patches, while Helix owns the write step: it stores the latest patch proposal, lets the user inspect it, and applies it only after confirmation.
+The agent process is intentionally read-only. Codex can explain code and propose patches, while DoomHelix owns the write step: it stores the latest patch proposal, lets the user inspect it, and applies it only after confirmation.
 
 ## Commands
 
@@ -20,7 +20,7 @@ Opens a new agent session scratch buffer. The session currently contains a gener
 
 `:agent acp`
 
-Opens a dry-run ACP handshake payload as JSON. The payload currently previews the `initialize` and `session/new` messages Helix would send to an ACP-compatible agent process. Helix-specific session context is attached under ACP's `_meta` extension field.
+Opens a dry-run ACP handshake payload as JSON. The payload currently previews the `initialize` and `session/new` messages DoomHelix would send to an ACP-compatible agent process. Editor-specific session context is attached under ACP's `_meta` extension field.
 
 `:agent launch-config`
 
@@ -41,15 +41,15 @@ Stops the registered agent process and clears the runtime slot.
 `:agent recv`
 
 Reads one framed JSON-RPC message from the running agent process and opens it in a JSON scratch buffer. This is a low-level debug command for inspecting raw ACP frames. Run this until `:agent status` shows a real session id instead of `<pending>`; many ACP servers reply to `initialize` before replying to `session/new`.
-If the agent exits before sending a response, Helix reports the process exit status and any stderr output it can capture.
+If the agent exits before sending a response, DoomHelix reports the process exit status and any stderr output it can capture.
 
 `:agent prompt <text>`
 
-Sends a `session/prompt` request to the running agent. The prompt includes a fresh Helix context snapshot under `_meta.helix.context`, so the agent sees the active file, cursor, selections, theme, mode, diagnostics, LSP servers, Git state, and recent commands at send time. After `:agent start`, run `:agent recv` until `:agent status` shows a real session id before sending prompts.
+Sends a `session/prompt` request to the running agent. The prompt includes a fresh DoomHelix context snapshot under `_meta.helix.context`, so the agent sees the active file, cursor, selections, theme, mode, diagnostics, LSP servers, Git state, and recent commands at send time. After `:agent start`, run `:agent recv` until `:agent status` shows a real session id before sending prompts.
 
 `:agent chat`
 
-Opens an agent prompt in Helix's prompt UI. When submitted, Helix starts the configured agent if needed, sends the prompt with a fresh context snapshot, automatically reads any pending handshake messages, and streams agent response chunks into the transcript buffer as they arrive.
+Opens an agent prompt in DoomHelix's prompt UI. When submitted, DoomHelix starts the configured agent if needed, sends the prompt with a fresh context snapshot, automatically reads any pending handshake messages, and streams agent response chunks into the transcript buffer as they arrive.
 
 `:agent ask <text>`
 
@@ -72,7 +72,7 @@ Starts the configured agent first if needed.
 
 `:agent edit`
 
-Asks Codex to return a git-apply compatible unified diff patch proposal for the current primary selection. Codex does not write files; Helix stores the patch for `:agent patch` and `:agent apply`.
+Asks Codex to return a git-apply compatible unified diff patch proposal for the current primary selection. Codex does not write files; DoomHelix stores the patch for `:agent patch` and `:agent apply`.
 Starts the configured agent first if needed.
 
 `:agent patch`
@@ -134,6 +134,8 @@ The snapshot currently includes:
 
 The fork supports an experimental `[editor.agent]` table:
 
+DoomHelix reads user config from `~/.config/doomhelix/config.toml`.
+
 ```toml
 [editor.agent]
 enable = true
@@ -160,7 +162,7 @@ args = ["--websocket", "127.0.0.1:9000"]
 ```
 
 The process-spawning layer resolves the configured `default-agent` from this table.
-Agent servers can use `transport = "stdio"` or `transport = "websocket"`. Stdio servers launch `command` with `args` and speak ACP using `Content-Length` framed JSON-RPC. WebSocket servers connect to `url` and exchange one ACP JSON-RPC message per text or binary WebSocket frame. If a websocket server has `command` and `args`, Helix starts that command before connecting.
+Agent servers can use `transport = "stdio"` or `transport = "websocket"`. Stdio servers launch `command` with `args` and speak ACP using `Content-Length` framed JSON-RPC. WebSocket servers connect to `url` and exchange one ACP JSON-RPC message per text or binary WebSocket frame. If a websocket server has `command` and `args`, DoomHelix starts that command before connecting.
 The local Codex CLI currently available in this environment does not expose a `codex acp` subcommand; configuring `codex acp` here will print Codex help and close stdout.
 
 `panel-position` controls where a new agent transcript split opens. Supported values are `left`, `right`, `top`, and `bottom`. `panel-size` is stored as a percentage for the intended panel size; the current split implementation opens an equal-sized split, and exact percentage sizing is reserved for a later weighted-split pass.
@@ -171,9 +173,12 @@ For Codex, build the experimental adapter first:
 cargo build -p helix-codex-agent
 ```
 
-Then configure Helix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to Helix and forwards prompt turns to `codex exec --skip-git-repo-check --sandbox read-only` with the current Helix context included in stdin. It forwards `codex exec` stdout as ACP `agent_message_chunk` updates while the process is still running. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
+Then configure DoomHelix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to DoomHelix and forwards prompt turns to `codex exec --skip-git-repo-check --sandbox read-only` with the current editor context included in stdin. It forwards `codex exec` stdout as ACP `agent_message_chunk` updates while the process is still running. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
 
-The adapter is intentionally read-only. It should return explanations or proposed patches, not write files directly. For edits, Codex returns a unified diff; Helix previews it with `:agent patch` and applies it with `:agent apply` only after confirmation.
+If installed with `install.sh`, use `doomhelix-codex-agent` in your config instead of
+`target/debug/helix-codex-agent`.
+
+The adapter is intentionally read-only. It should return explanations or proposed patches, not write files directly. For edits, Codex returns a unified diff; DoomHelix previews it with `:agent patch` and applies it with `:agent apply` only after confirmation.
 
 ## Suggested Keymap
 

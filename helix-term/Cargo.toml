@@ -1,8 +1,8 @@
 [package]
 name = "helix-term"
-description = "A post-modern text editor."
+description = "An agentic modal code editor based on Helix."
 include = ["src/**/*", "README.md"]
-default-run = "hx"
+default-run = "dhx"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -14,19 +14,14 @@ homepage.workspace = true
 
 [package.metadata.deb]
 # generate a .deb in target/debian/ with the command: cargo deb --no-build
-name = "helix"
+name = "doomhelix"
 assets = [
-  { source = "target/release/hx", dest = "/usr/lib/helix/", mode = "755" },
-  { source = "../contrib/hx_launcher.sh", dest = "/usr/bin/hx", mode = "755" },
-  { source = "../runtime/*", dest = "/usr/lib/helix/runtime/", mode = "644" },
-  { source = "../runtime/grammars/*", dest = "/usr/lib/helix/runtime/grammars/", mode = "644" }, # to avoid sources/
-  { source = "../runtime/queries/**/*", dest = "/usr/lib/helix/runtime/queries/", mode = "644" },
-  { source = "../runtime/themes/**/*", dest = "/usr/lib/helix/runtime/themes/", mode = "644" },
-  { source = "../README.md", dest = "/usr/share/doc/helix/", mode = "644" },
-  { source = "../contrib/completion/hx.bash", dest = "/usr/share/bash-completion/completions/hx", mode = "644" },
-  { source = "../contrib/completion/hx.fish", dest = "/usr/share/fish/vendor_completions.d/hx.fish", mode = "644" },
-  { source = "../contrib/completion/hx.zsh", dest = "/usr/share/zsh/vendor-completions/_hx", mode = "644" },
-  { source = "../contrib/Helix.desktop", dest = "/usr/share/applications/Helix.desktop", mode = "644" },
+  { source = "target/release/dhx", dest = "/usr/lib/doomhelix/", mode = "755" },
+  { source = "../runtime/*", dest = "/usr/lib/doomhelix/runtime/", mode = "644" },
+  { source = "../runtime/grammars/*", dest = "/usr/lib/doomhelix/runtime/grammars/", mode = "644" }, # to avoid sources/
+  { source = "../runtime/queries/**/*", dest = "/usr/lib/doomhelix/runtime/queries/", mode = "644" },
+  { source = "../runtime/themes/**/*", dest = "/usr/lib/doomhelix/runtime/themes/", mode = "644" },
+  { source = "../README.md", dest = "/usr/share/doc/doomhelix/", mode = "644" },
   { source = "../contrib/helix.png", dest = "/usr/share/icons/hicolor/256x256/apps/helix.png", mode = "644" },
 ]
 
@@ -37,7 +32,7 @@ integration = ["helix-event/integration_test"]
 git = ["helix-vcs/git"]
 
 [[bin]]
-name = "hx"
+name = "dhx"
 path = "src/main.rs"
 
 [dependencies]

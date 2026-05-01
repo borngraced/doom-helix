@@ -1,64 +1,61 @@
-<div align="center">
+# DoomHelix
 
-<h1>
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="logo_dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="logo_light.svg">
-  <img alt="Helix" height="128" src="logo_light.svg">
-</picture>
-</h1>
+DoomHelix is an experimental agentic modal code editor based on
+[Helix](https://helix-editor.com/). It keeps Helix's modal editing core and adds
+an editor-native agent workflow for chat, explanations, patch proposals, apply
+review, and streamed transcript rendering.
 
-[![Build status](https://github.com/helix-editor/helix/actions/workflows/build.yml/badge.svg)](https://github.com/helix-editor/helix/actions)
-[![GitHub Release](https://img.shields.io/github/v/release/helix-editor/helix)](https://github.com/helix-editor/helix/releases/latest)
-[![Documentation](https://shields.io/badge/-documentation-452859)](https://docs.helix-editor.com/)
-[![GitHub contributors](https://img.shields.io/github/contributors/helix-editor/helix)](https://github.com/helix-editor/helix/graphs/contributors)
-[![Matrix Space](https://img.shields.io/matrix/helix-community:matrix.org)](https://matrix.to/#/#helix-community:matrix.org)
+The editor binary is:
 
-</div>
+```sh
+dhx
+```
 
-![Screenshot](./screenshot.png)
+## Agent Workflow
 
-A [Kakoune](https://github.com/mawww/kakoune) / [Neovim](https://github.com/neovim/neovim) inspired editor, written in Rust.
+- `:agent chat` opens a prompt-backed chat turn.
+- `:agent explain` explains the current selection.
+- `:agent fix` asks for a fix proposal for the current selection.
+- `:agent refactor` asks for a refactor proposal.
+- `:agent edit` asks for a unified diff patch proposal.
+- `:agent patch` previews the latest patch.
+- `:agent apply` applies the latest patch after confirmation.
+- `:agent panel` opens or focuses the transcript panel.
 
-The editing model is very heavily based on Kakoune; during development I found
-myself agreeing with most of Kakoune's design decisions.
+See [docs/agent.md](docs/agent.md) for the current configuration and keymap
+surface.
 
-For more information, see the [website](https://helix-editor.com) or
-[documentation](https://docs.helix-editor.com/).
+## Install
 
-All shortcuts/keymaps can be found [in the documentation on the website](https://docs.helix-editor.com/keymap.html).
+From a checkout:
 
-[Troubleshooting](https://github.com/helix-editor/helix/wiki/Troubleshooting)
+```sh
+sh install.sh
+```
 
-# Features
+From a remote script:
 
-- Vim-like modal editing
-- Multiple selections
-- Built-in language server support
-- Smart, incremental syntax highlighting and code editing via tree-sitter
+```sh
+curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
+```
 
-Although it's primarily a terminal-based editor, I am interested in exploring
-a custom renderer (similar to Emacs) using wgpu.
+The installer builds from source and installs:
 
-Note: Only certain languages have indentation definitions at the moment. Check
-`runtime/queries/<lang>/` for `indents.scm`.
+- `dhx` to `~/.local/bin/dhx`
+- `dhx-bin` to `~/.local/bin/dhx-bin`
+- `doomhelix-codex-agent` to `~/.local/bin/doomhelix-codex-agent`
+- runtime files to `~/.local/share/doomhelix/runtime`
+- config is read from `~/.config/doomhelix/config.toml`
 
-# Installation
+Override paths with `DOOMHELIX_PREFIX`, `DOOMHELIX_BIN_DIR`, or
+`DOOMHELIX_RUNTIME_DIR`.
 
-[Installation documentation](https://docs.helix-editor.com/install.html).
+## Upstream
 
-[![Packaging status](https://repology.org/badge/vertical-allrepos/helix-editor.svg?exclude_unsupported=1)](https://repology.org/project/helix-editor/versions)
+DoomHelix is currently a fork of Helix. The original Helix project is available
+at <https://github.com/helix-editor/helix>.
 
-# Contributing
+## License
 
-Contributing guidelines can be found [here](./docs/CONTRIBUTING.md).
-
-# Getting help
-
-Your question might already be answered on the [FAQ](https://github.com/helix-editor/helix/wiki/FAQ).
-
-Discuss the project on the community [Matrix Space](https://matrix.to/#/#helix-community:matrix.org) (make sure to join `#helix-editor:matrix.org` if you're on a client that doesn't support Matrix Spaces yet).
-
-# Credits
-
-Thanks to [@jakenvac](https://github.com/jakenvac) for designing the logo!
+DoomHelix keeps Helix's MPL-2.0 licensing for modified upstream source files.
+See [LICENSE](LICENSE).
