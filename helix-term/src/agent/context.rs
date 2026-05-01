@@ -246,6 +246,42 @@ pub fn current_snapshot_pretty(editor: &Editor) -> anyhow::Result<String> {
     Ok(serde_json::to_string_pretty(&current_snapshot(editor))?)
 }
 
+pub fn prompt_with_primary_selection(editor: &Editor, prompt: &str) -> String {
+    let snapshot = current_snapshot(editor);
+    let Some(selection) = snapshot
+        .selections
+        .iter()
+        .find(|selection| selection.primary && !selection.text.trim().is_empty())
+    else {
+        return prompt.to_string();
+    };
+
+    let path = snapshot
+        .active_file
+        .path
+        .as_deref()
+        .unwrap_or(snapshot.active_file.display_name.as_str());
+    let truncated = if selection.truncated {
+        "\n\nNote: the selected text was truncated in the editor context."
+    } else {
+        ""
+    };
+
+    format!(
+        "{prompt}\n\nSelected text from {path}:{}:{}-{}:{}:\n```{}\n{}\n```{truncated}",
+        selection.start.line + 1,
+        selection.start.column + 1,
+        selection.end.line + 1,
+        selection.end.column + 1,
+        snapshot
+            .active_file
+            .language_id
+            .as_deref()
+            .unwrap_or_default(),
+        selection.text
+    )
+}
+
 pub fn current_request_pretty(editor: &Editor, prompt: &str) -> anyhow::Result<String> {
     let request = AgentRequest {
         schema_version: 1,

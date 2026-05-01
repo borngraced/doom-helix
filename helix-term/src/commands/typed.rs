@@ -688,6 +688,7 @@ fn chat_agent(cx: &mut compositor::Context) {
 }
 
 fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Result<()> {
+    let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
     let meta = serde_json::json!({
         "helix": {
             "context": crate::agent::context::current_snapshot(cx.editor),
