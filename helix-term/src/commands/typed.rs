@@ -811,7 +811,17 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
                                 cx.jobs.callback(async move {
                                     apply_agent_patch_with_git(patch).await?;
                                     Ok(job::Callback::Editor(Box::new(|editor| {
-                                        editor.set_status("Agent patch applied");
+                                        let (reloaded, skipped) =
+                                            reload_unmodified_file_documents(editor);
+                                        if skipped == 0 {
+                                            editor.set_status(format!(
+                                                "Agent patch applied; reloaded {reloaded} buffer(s)"
+                                            ));
+                                        } else {
+                                            editor.set_status(format!(
+                                                "Agent patch applied; reloaded {reloaded} buffer(s), skipped {skipped} modified buffer(s)"
+                                            ));
+                                        }
                                     })))
                                 });
                             }
@@ -853,6 +863,60 @@ async fn apply_agent_patch_with_git(patch: String) -> anyhow::Result<()> {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     anyhow::bail!("git apply failed: {}", stderr.trim());
+}
+
+fn reload_unmodified_file_documents(editor: &mut Editor) -> (usize, usize) {
+    let scrolloff = editor.config().scrolloff;
+    let current_view_id = view!(editor).id;
+    let mut skipped = 0;
+
+    let docs_view_ids: Vec<(DocumentId, Vec<ViewId>)> = editor
+        .documents_mut()
+        .filter_map(|doc| {
+            doc.path().as_ref()?;
+            if doc.is_modified() {
+                skipped += 1;
+                return None;
+            }
+
+            let mut view_ids: Vec<_> = doc.selections().keys().cloned().collect();
+            if view_ids.is_empty() {
+                doc.ensure_view_init(current_view_id);
+                view_ids.push(current_view_id);
+            }
+
+            Some((doc.id(), view_ids))
+        })
+        .collect();
+
+    let mut reloaded = 0;
+    for (doc_id, view_ids) in docs_view_ids {
+        let doc = doc_mut!(editor, &doc_id);
+        let view = view_mut!(editor, view_ids[0]);
+        view.sync_changes(doc);
+
+        if doc.reload(view, &editor.diff_providers).is_err() {
+            skipped += 1;
+            continue;
+        }
+
+        reloaded += 1;
+        if let Some(path) = doc.path() {
+            editor
+                .language_servers
+                .file_event_handler
+                .file_changed(path.clone());
+        }
+
+        for view_id in view_ids {
+            let view = view_mut!(editor, view_id);
+            if view.doc.eq(&doc_id) {
+                view.ensure_cursor_in_view(doc, scrolloff);
+            }
+        }
+    }
+
+    (reloaded, skipped)
 }
 
 fn agent_panel_action(position: AgentPanelPosition) -> Action {
