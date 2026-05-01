@@ -267,6 +267,7 @@ pub struct AgentTranscriptTurn {
     pub kind: AgentTranscriptKind,
     pub prompt: String,
     pub response: Option<String>,
+    pub status_message: Option<String>,
     pub status: AgentTranscriptStatus,
 }
 
@@ -308,6 +309,7 @@ pub fn append_transcript_turn(id: u64, kind: AgentTranscriptKind, prompt: String
             kind,
             prompt,
             response: None,
+            status_message: Some("Working...".to_string()),
             status: AgentTranscriptStatus::Pending,
         });
 }
@@ -328,6 +330,15 @@ pub fn append_transcript_turn_response(id: u64, chunk: String) {
         turn.response
             .get_or_insert_with(String::new)
             .push_str(&chunk);
+    }
+}
+
+pub fn update_transcript_turn_status(id: u64, status_message: String) {
+    let mut turns = AGENT_TRANSCRIPT_TURNS
+        .lock()
+        .expect("agent transcript turns lock poisoned");
+    if let Some(turn) = turns.iter_mut().find(|turn| turn.id == id) {
+        turn.status_message = Some(status_message);
     }
 }
 
@@ -371,15 +382,17 @@ pub fn render_transcript() -> String {
         rendered.push_str("**Codex:**\n\n");
         match turn.status {
             AgentTranscriptStatus::Pending => {
+                let status_message = turn.status_message.as_deref().unwrap_or("Working...");
                 if let Some(response) = turn
                     .response
                     .as_ref()
                     .filter(|response| !response.is_empty())
                 {
                     rendered.push_str(response);
-                    rendered.push_str("\n\nWorking...");
+                    rendered.push_str("\n\n");
+                    rendered.push_str(status_message);
                 } else {
-                    rendered.push_str("Working...");
+                    rendered.push_str(status_message);
                 }
             }
             AgentTranscriptStatus::Cancelled => rendered.push_str("Cancelled"),

@@ -268,6 +268,7 @@ fn run_codex_exec_stream(
         .arg("exec")
         .arg("--color")
         .arg("never")
+        .arg("--json")
         .arg("--skip-git-repo-check")
         .arg("--sandbox")
         .arg("read-only")
@@ -318,7 +319,7 @@ fn run_codex_exec_stream(
         }
 
         saw_stdout = true;
-        write_agent_message_chunk(output, session_id, &line)?;
+        write_codex_json_event(output, session_id, &line)?;
     }
 
     let status = child.wait().context("failed to read codex exec output")?;
@@ -343,6 +344,78 @@ fn run_codex_exec_stream(
     write_agent_message_chunk(output, session_id, &message)?;
 
     Ok(())
+}
+
+fn write_codex_json_event(
+    output: &mut impl AgentOutput,
+    session_id: &str,
+    line: &str,
+) -> Result<()> {
+    let Ok(event) = serde_json::from_str::<Value>(line) else {
+        return write_agent_message_chunk(output, session_id, line);
+    };
+
+    match event.get("type").and_then(Value::as_str) {
+        Some("thread.started") => write_agent_status(output, session_id, "Session started"),
+        Some("turn.started") => write_agent_status(output, session_id, "Thinking..."),
+        Some("turn.completed") => write_agent_status(output, session_id, "Done"),
+        Some("item.completed") => write_codex_completed_item(output, session_id, &event),
+        Some(event_type) => {
+            write_agent_status(output, session_id, &format!("Codex event: {event_type}"))
+        }
+        None => Ok(()),
+    }
+}
+
+fn write_codex_completed_item(
+    output: &mut impl AgentOutput,
+    session_id: &str,
+    event: &Value,
+) -> Result<()> {
+    let Some(item) = event.get("item") else {
+        return Ok(());
+    };
+
+    match item.get("type").and_then(Value::as_str) {
+        Some("agent_message") => {
+            if let Some(text) = item.get("text").and_then(Value::as_str) {
+                write_agent_message_chunk(output, session_id, text)?;
+            }
+            Ok(())
+        }
+        Some("command_execution") => {
+            let command = item
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("command");
+            write_agent_status(output, session_id, &format!("Ran `{command}`"))
+        }
+        Some("tool_call") => {
+            let name = item.get("name").and_then(Value::as_str).unwrap_or("tool");
+            write_agent_status(output, session_id, &format!("Used `{name}`"))
+        }
+        Some(item_type) => {
+            write_agent_status(output, session_id, &format!("Completed {item_type}"))
+        }
+        None => Ok(()),
+    }
+}
+
+fn write_agent_status(output: &mut impl AgentOutput, session_id: &str, text: &str) -> Result<()> {
+    output.write_message(&json!({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": session_id,
+            "update": {
+                "sessionUpdate": "agent_status",
+                "content": {
+                    "type": "text",
+                    "text": text
+                }
+            }
+        }
+    }))
 }
 
 fn write_agent_message_chunk(

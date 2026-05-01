@@ -1267,12 +1267,23 @@ fn prompt_agent_turn(
                     }
 
                     match agent_message_update_markdown_chunk(message) {
-                        Ok(Some(chunk)) => {
+                        Ok(Some(AgentStreamingUpdate::Response(chunk))) => {
                             crate::job::dispatch_blocking(move |editor, _compositor| {
                                 if let Err(err) = append_agent_streaming_transcript_editor(
                                     editor,
                                     stream_pending_range,
                                     chunk,
+                                ) {
+                                    editor.set_error(err.to_string());
+                                }
+                            });
+                        }
+                        Ok(Some(AgentStreamingUpdate::Status(status))) => {
+                            crate::job::dispatch_blocking(move |editor, _compositor| {
+                                if let Err(err) = update_agent_streaming_status_editor(
+                                    editor,
+                                    stream_pending_range,
+                                    status,
                                 ) {
                                     editor.set_error(err.to_string());
                                 }
@@ -1445,6 +1456,27 @@ fn append_agent_streaming_transcript_editor(
     chunk: String,
 ) -> anyhow::Result<()> {
     crate::agent::runtime::append_transcript_turn_response(pending_turn.id, chunk);
+
+    if editor.document(pending_turn.doc_id).is_none() {
+        return Ok(());
+    }
+
+    let Some(view_id) = agent_transcript_view_id(editor, pending_turn.doc_id) else {
+        return Ok(());
+    };
+
+    render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
+    move_agent_transcript_cursor_to_end(editor, pending_turn.doc_id, view_id);
+
+    Ok(())
+}
+
+fn update_agent_streaming_status_editor(
+    editor: &mut Editor,
+    pending_turn: AgentPendingTurn,
+    status: String,
+) -> anyhow::Result<()> {
+    crate::agent::runtime::update_transcript_turn_status(pending_turn.id, status);
 
     if editor.document(pending_turn.doc_id).is_none() {
         return Ok(());
@@ -1719,6 +1751,7 @@ fn agent_turn_response_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyh
 
         match update_kind {
             "agent_message_chunk" => response.push_str(text),
+            "agent_status" => {}
             "agent_thought_chunk" => {
                 writeln!(response, "\n\n> {text}")?;
             }
@@ -1736,9 +1769,14 @@ fn agent_turn_response_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyh
     Ok(normalize_agent_markdown_fence_languages(response.trim()))
 }
 
+enum AgentStreamingUpdate {
+    Response(String),
+    Status(String),
+}
+
 fn agent_message_update_markdown_chunk(
     message: &crate::agent::acp::JsonRpcMessage,
-) -> anyhow::Result<Option<String>> {
+) -> anyhow::Result<Option<AgentStreamingUpdate>> {
     let value = serde_json::to_value(message)?;
     let Some(method) = value.get("method").and_then(Value::as_str) else {
         return Ok(None);
@@ -1765,10 +1803,15 @@ fn agent_message_update_markdown_chunk(
     };
 
     match update_kind {
-        "agent_message_chunk" => Ok(Some(text.to_string())),
-        "agent_thought_chunk" => Ok(Some(format!("\n\n> {text}"))),
+        "agent_message_chunk" => Ok(Some(AgentStreamingUpdate::Response(text.to_string()))),
+        "agent_status" => Ok(Some(AgentStreamingUpdate::Status(text.to_string()))),
+        "agent_thought_chunk" => Ok(Some(AgentStreamingUpdate::Response(format!(
+            "\n\n> {text}"
+        )))),
         "user_message_chunk" => Ok(None),
-        _ => Ok(Some(format!("\n\n`{update_kind}`: {text}"))),
+        _ => Ok(Some(AgentStreamingUpdate::Response(format!(
+            "\n\n`{update_kind}`: {text}"
+        )))),
     }
 }
 
