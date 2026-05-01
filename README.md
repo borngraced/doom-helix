@@ -43,12 +43,13 @@ The installer builds from source and installs:
 
 - `dhx` to `~/.local/bin/dhx`
 - `dhx-bin` to `~/.local/bin/dhx-bin`
-- `doomhelix-codex-agent` to `~/.local/bin/doomhelix-codex-agent`
+- `codex-acp` to `~/.local/bin/codex-acp`
 - runtime files to `~/.local/share/doomhelix/runtime`
 - config is read from `~/.config/doomhelix/config.toml`
 
 Override paths with `DOOMHELIX_PREFIX`, `DOOMHELIX_BIN_DIR`, or
 `DOOMHELIX_RUNTIME_DIR`.
+Install the legacy DoomHelix Codex adapter with `DOOMHELIX_INSTALL_LEGACY_CODEX_AGENT=1`.
 
 ## Upstream
 

@@ -8,6 +8,7 @@ bin_dir=${DOOMHELIX_BIN_DIR:-"$prefix/bin"}
 share_dir=${DOOMHELIX_SHARE_DIR:-"$prefix/share/doomhelix"}
 runtime_dir=${DOOMHELIX_RUNTIME_DIR:-"$share_dir/runtime"}
 install_codex_acp=${DOOMHELIX_INSTALL_CODEX_ACP:-1}
+install_legacy_codex_agent=${DOOMHELIX_INSTALL_LEGACY_CODEX_AGENT:-0}
 codex_acp_version=${CODEX_ACP_VERSION:-0.12.0}
 
 need() {
@@ -145,11 +146,15 @@ trap cleanup_on_exit EXIT INT TERM
 cd "$source_dir"
 
 cargo build --release -p helix-term --bin dhx
-cargo build --release -p helix-codex-agent
+if [ "$install_legacy_codex_agent" = 1 ]; then
+  cargo build --release -p helix-codex-agent
+fi
 
 mkdir -p "$bin_dir" "$share_dir"
 install -m 755 target/release/dhx "$bin_dir/dhx-bin"
-install -m 755 target/release/helix-codex-agent "$bin_dir/doomhelix-codex-agent"
+if [ "$install_legacy_codex_agent" = 1 ]; then
+  install -m 755 target/release/helix-codex-agent "$bin_dir/doomhelix-codex-agent"
+fi
 install_codex_acp
 copy_dir runtime "$runtime_dir"
 cat >"$bin_dir/dhx" <<EOF
@@ -165,9 +170,12 @@ Binary:
   $bin_dir/dhx
   $bin_dir/dhx-bin
 
-Codex adapter:
-  $bin_dir/doomhelix-codex-agent
+Codex ACP adapter:
   $bin_dir/codex-acp
+
+Legacy DoomHelix Codex adapter:
+  disabled by default
+  set DOOMHELIX_INSTALL_LEGACY_CODEX_AGENT=1 to install doomhelix-codex-agent
 
 Runtime:
   $runtime_dir

@@ -151,34 +151,19 @@ require-approval-for-shell = true
 
 [editor.agent.servers.codex]
 transport = "stdio"
-command = "target/debug/helix-codex-agent"
+command = "codex-acp"
 args = []
-
-[editor.agent.servers.remote]
-transport = "websocket"
-url = "ws://127.0.0.1:9000/acp"
-command = "target/debug/helix-codex-agent"
-args = ["--websocket", "127.0.0.1:9000"]
 ```
 
 The process-spawning layer resolves the configured `default-agent` from this table.
 Agent servers can use `transport = "stdio"` or `transport = "websocket"`. Stdio servers launch `command` with `args` and speak ACP using `Content-Length` framed JSON-RPC. WebSocket servers connect to `url` and exchange one ACP JSON-RPC message per text or binary WebSocket frame. If a websocket server has `command` and `args`, DoomHelix starts that command before connecting.
-The local Codex CLI currently available in this environment does not expose a `codex acp` subcommand; configuring `codex acp` here will print Codex help and close stdout.
+Use `codex-acp` for Codex. It is the supported adapter for real ACP permission prompts.
 
 `panel-position` controls where a new agent transcript split opens. Supported values are `left`, `right`, `top`, and `bottom`. `panel-size` is stored as a percentage for the intended panel size; the current split implementation opens an equal-sized split, and exact percentage sizing is reserved for a later weighted-split pass.
 
-For Codex, build the experimental adapter first:
+When Codex requests command execution or file changes, `codex-acp` sends `session/request_permission` to DoomHelix. DoomHelix shows a `[y/N]` prompt with the request details and returns the selected ACP permission option.
 
-```sh
-cargo build -p helix-codex-agent
-```
-
-Then configure DoomHelix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to DoomHelix, starts `codex app-server --listen stdio://`, creates one Codex thread for the editor session, and forwards prompt turns through `turn/start`. It forwards `item/agentMessage/delta` events as ACP `agent_message_chunk` updates while the turn is still running. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
-
-If installed with `install.sh`, use `doomhelix-codex-agent` in your config instead of
-`target/debug/helix-codex-agent`.
-
-When Codex requests command execution or file changes, the adapter sends an approval request back to DoomHelix. DoomHelix shows a `[y/N]` prompt with the request details and returns the decision to Codex.
+`doomhelix-codex-agent` remains available as a legacy/debug adapter when installed with `DOOMHELIX_INSTALL_LEGACY_CODEX_AGENT=1`, but it is not the default Codex backend.
 
 ## Suggested Keymap
 
