@@ -366,7 +366,7 @@ write_default_config() {
     printf '%s\n' 'a = ":agent apply"'
     printf '%s\n' 'p = ":agent patch"'
     printf '%s\n' 'P = ":agent panel"'
-    printf '%s\n' 'R = ":agent restore"'
+    printf '%s\n' 'o = ":agent restore"'
     printf '%s\n' '"+" = ":agent resize +5"'
     printf '%s\n' '"-" = ":agent resize -5"'
     printf '%s\n' 's = ":agent start"'
