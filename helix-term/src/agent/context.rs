@@ -255,6 +255,10 @@ pub fn current_snapshot_pretty(editor: &Editor) -> anyhow::Result<String> {
 
 pub fn prompt_with_primary_selection(editor: &Editor, prompt: &str) -> String {
     let snapshot = current_snapshot(editor);
+    prompt_with_primary_selection_snapshot(&snapshot, prompt)
+}
+
+pub fn prompt_with_primary_selection_snapshot(snapshot: &EditorSnapshot, prompt: &str) -> String {
     let Some(selection) = snapshot
         .selections
         .iter()

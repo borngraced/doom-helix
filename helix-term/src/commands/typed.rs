@@ -1227,7 +1227,8 @@ fn prompt_agent_turn(
     let launch_config = cx.editor.config().agent.launch_config()?;
     let handshake = crate::agent::acp::session_handshake(cx.editor)?;
     let snapshot = crate::agent::context::current_snapshot(cx.editor);
-    let transcript_prompt = prompt.trim().to_string();
+    let transcript_prompt =
+        crate::agent::context::prompt_with_primary_selection_snapshot(&snapshot, prompt.trim());
     let prompt =
         agent_prompt_with_formatting(kind, &prompt, snapshot.active_file.language_id.as_deref());
     let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
