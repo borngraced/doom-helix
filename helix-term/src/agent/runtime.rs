@@ -83,6 +83,43 @@ pub async fn recv_next() -> anyhow::Result<JsonRpcMessage> {
     }
 }
 
+pub async fn send_prompt_turn(prompt: String, meta: Option<Value>) -> anyhow::Result<AgentTurn> {
+    let Some(mut running) = take_running_agent() else {
+        anyhow::bail!("no agent is running");
+    };
+
+    let mut messages = Vec::new();
+    while running.session_id.is_none() {
+        let message = recv_running_message(&mut running).await?;
+        update_session_id(&mut running, &message);
+        messages.push(message);
+    }
+
+    let session_id = running
+        .session_id
+        .clone()
+        .expect("session id checked before prompt send");
+    let request_id = running.next_request_id;
+    running.next_request_id += 1;
+    let request = super::acp::prompt_request(request_id, session_id, prompt, meta)?;
+    running.process.send(&request).await?;
+
+    loop {
+        let message = recv_running_message(&mut running).await?;
+        let turn_done =
+            matches!(&message, JsonRpcMessage::Response(response) if response.id == request_id);
+        update_session_id(&mut running, &message);
+        messages.push(message);
+        if turn_done {
+            restore_running_agent(running);
+            return Ok(AgentTurn {
+                request_id,
+                messages,
+            });
+        }
+    }
+}
+
 pub async fn send_prompt(prompt: String, meta: Option<Value>) -> anyhow::Result<u64> {
     let Some(mut running) = take_running_agent() else {
         anyhow::bail!("no agent is running");
@@ -102,6 +139,32 @@ pub async fn send_prompt(prompt: String, meta: Option<Value>) -> anyhow::Result<
     restore_running_agent(running);
     send_result?;
     Ok(request_id)
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct AgentTurn {
+    pub request_id: u64,
+    pub messages: Vec<JsonRpcMessage>,
+}
+
+async fn recv_running_message(running: &mut RunningAgent) -> anyhow::Result<JsonRpcMessage> {
+    match running.process.recv().await {
+        Ok(message) => Ok(message),
+        Err(err) => {
+            let exit_status = running.process.try_wait()?;
+            let stderr = running.process.stderr_snapshot().await?;
+
+            let mut message = format!("failed to read agent message: {err}");
+            if let Some(status) = exit_status {
+                message.push_str(&format!("; process exited with {status}"));
+            }
+            if let Some(stderr) = stderr {
+                message.push_str(&format!("; stderr: {stderr}"));
+            }
+
+            anyhow::bail!(message);
+        }
+    }
 }
 
 fn take_running_agent() -> Option<RunningAgent> {

@@ -656,6 +656,60 @@ fn prompt_agent(cx: &mut compositor::Context, prompt: String) -> anyhow::Result<
     Ok(())
 }
 
+fn chat_agent(cx: &mut compositor::Context) {
+    cx.jobs.callback(async move {
+        Ok(job::Callback::EditorCompositor(Box::new(
+            move |editor, compositor| {
+                let mut prompt = ui::Prompt::new(
+                    "agent: ".into(),
+                    None,
+                    |_editor, _input| Vec::new(),
+                    move |cx, input, event| {
+                        if event != PromptEvent::Validate {
+                            return;
+                        }
+
+                        let input = input.trim();
+                        if input.is_empty() {
+                            cx.editor.set_error("agent prompt requires text");
+                            return;
+                        }
+
+                        if let Err(err) = prompt_agent_turn(cx, input.to_string()) {
+                            cx.editor.set_error(err.to_string());
+                        }
+                    },
+                );
+                prompt.recalculate_completion(editor);
+                compositor.push(Box::new(prompt));
+            },
+        )))
+    });
+}
+
+fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Result<()> {
+    let meta = serde_json::json!({
+        "helix": {
+            "context": crate::agent::context::current_snapshot(cx.editor),
+        }
+    });
+
+    cx.jobs.callback(async move {
+        let turn = crate::agent::runtime::send_prompt_turn(prompt, Some(meta)).await?;
+        let contents = agent_turn_markdown(&turn)?;
+        let request_id = turn.request_id;
+        Ok(job::Callback::Editor(Box::new(move |editor| {
+            if let Err(err) = open_agent_markdown_scratch_editor(editor, contents) {
+                editor.set_error(err.to_string());
+            } else {
+                editor.set_status(format!("Agent turn #{request_id} complete"));
+            }
+        })))
+    });
+
+    Ok(())
+}
+
 fn show_agent_status(cx: &mut compositor::Context) {
     cx.editor.set_status(agent_status_message());
 }
@@ -679,6 +733,18 @@ fn open_agent_json_scratch(cx: &mut compositor::Context, contents: String) -> an
 }
 
 fn open_agent_json_scratch_editor(editor: &mut Editor, contents: String) -> anyhow::Result<()> {
+    open_agent_scratch_editor(editor, contents, "json")
+}
+
+fn open_agent_markdown_scratch_editor(editor: &mut Editor, contents: String) -> anyhow::Result<()> {
+    open_agent_scratch_editor(editor, contents, "markdown")
+}
+
+fn open_agent_scratch_editor(
+    editor: &mut Editor,
+    contents: String,
+    language_id: &str,
+) -> anyhow::Result<()> {
     let doc_id = editor.new_file(Action::HorizontalSplit);
     let view_id = view!(editor).id;
     let loader = editor.syn_loader.load();
@@ -687,9 +753,59 @@ fn open_agent_json_scratch_editor(editor: &mut Editor, contents: String) -> anyh
     let selection = Selection::point(0);
     let transaction = Transaction::insert(doc.text(), &selection, contents.into());
     doc.apply(&transaction, view_id);
-    doc.set_language_by_language_id("json", &loader).ok();
+    doc.set_language_by_language_id(language_id, &loader).ok();
 
     Ok(())
+}
+
+fn agent_turn_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyhow::Result<String> {
+    let mut output = String::new();
+
+    for message in &turn.messages {
+        let value = serde_json::to_value(message)?;
+        let Some(method) = value.get("method").and_then(Value::as_str) else {
+            continue;
+        };
+
+        if method != "session/update" {
+            continue;
+        }
+
+        let Some(update) = value.get("params").and_then(|params| params.get("update")) else {
+            continue;
+        };
+
+        let update_kind = update
+            .get("sessionUpdate")
+            .and_then(Value::as_str)
+            .unwrap_or("update");
+        let Some(text) = update
+            .get("content")
+            .and_then(|content| content.get("text"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+
+        match update_kind {
+            "agent_message_chunk" => output.push_str(text),
+            "agent_thought_chunk" => {
+                writeln!(output, "\n\n> {text}")?;
+            }
+            "user_message_chunk" => {
+                writeln!(output, "\n\n**User:** {text}")?;
+            }
+            _ => {
+                writeln!(output, "\n\n`{update_kind}`: {text}")?;
+            }
+        }
+    }
+
+    if output.trim().is_empty() {
+        output = serde_json::to_string_pretty(turn)?;
+    }
+
+    Ok(output)
 }
 
 fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
@@ -718,6 +834,10 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
                 .filter(|prompt| !prompt.is_empty())
                 .context("agent prompt requires text")?;
             prompt_agent(cx, prompt.to_string())
+        }
+        Some("chat") => {
+            chat_agent(cx);
+            Ok(())
         }
         Some("status") => {
             show_agent_status(cx);
