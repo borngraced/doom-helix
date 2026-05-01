@@ -20,7 +20,7 @@ Opens a new agent session scratch buffer. The session currently contains a gener
 
 `:agent acp`
 
-Opens a dry-run ACP handshake payload as JSON. The payload currently previews the `initialize`, `initialized`, and `session/new` messages Helix would send to an ACP-compatible agent process.
+Opens a dry-run ACP handshake payload as JSON. The payload currently previews the `initialize` and `session/new` messages Helix would send to an ACP-compatible agent process. Helix-specific session context is attached under ACP's `_meta` extension field.
 
 `:agent-context`
 
@@ -64,6 +64,6 @@ The snapshot currently includes:
 The next implementation steps are:
 
 1. Spawn an external ACP-compatible subprocess.
-2. Send `initialize`, `initialized`, and `session/new` JSON-RPC messages over stdio.
+2. Send `initialize` and `session/new` JSON-RPC messages over stdio.
 3. Render responses in an agent buffer.
 4. Add explicit permission gates before any write, shell, or command-execution tool.

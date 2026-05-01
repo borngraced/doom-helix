@@ -1,5 +1,5 @@
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::session::{self, AgentSession};
 
@@ -22,19 +22,41 @@ pub struct JsonRpcNotification {
 
 #[derive(Debug, Serialize)]
 pub struct InitializeParams {
+    #[serde(rename = "protocolVersion")]
     pub protocol_version: u32,
-    pub client: ClientInfo,
+    #[serde(rename = "clientCapabilities")]
+    pub client_capabilities: ClientCapabilities,
+    #[serde(rename = "clientInfo")]
+    pub client_info: ImplementationInfo,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ClientInfo {
+pub struct ClientCapabilities {
+    pub fs: FileSystemCapabilities,
+    pub terminal: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSystemCapabilities {
+    pub read_text_file: bool,
+    pub write_text_file: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImplementationInfo {
     pub name: &'static str,
+    pub title: &'static str,
     pub version: &'static str,
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NewSessionParams {
-    pub session: AgentSession,
+    pub cwd: String,
+    pub mcp_servers: Vec<Value>,
+    #[serde(rename = "_meta")]
+    pub meta: Value,
 }
 
 pub fn initialize_request(id: u64) -> anyhow::Result<JsonRpcRequest> {
@@ -44,8 +66,16 @@ pub fn initialize_request(id: u64) -> anyhow::Result<JsonRpcRequest> {
         method: "initialize",
         params: serde_json::to_value(InitializeParams {
             protocol_version: ACP_PROTOCOL_VERSION,
-            client: ClientInfo {
+            client_capabilities: ClientCapabilities {
+                fs: FileSystemCapabilities {
+                    read_text_file: false,
+                    write_text_file: false,
+                },
+                terminal: false,
+            },
+            client_info: ImplementationInfo {
                 name: "helix",
+                title: "Helix",
                 version: helix_loader::VERSION_AND_GIT_HASH,
             },
         })?,
@@ -57,16 +87,16 @@ pub fn new_session_request(id: u64, session: AgentSession) -> anyhow::Result<Jso
         jsonrpc: "2.0",
         id,
         method: "session/new",
-        params: serde_json::to_value(NewSessionParams { session })?,
+        params: serde_json::to_value(NewSessionParams {
+            cwd: session.context.cwd.clone(),
+            mcp_servers: Vec::new(),
+            meta: json!({
+                "helix": {
+                    "session": session,
+                }
+            }),
+        })?,
     })
-}
-
-pub fn initialized_notification() -> JsonRpcNotification {
-    JsonRpcNotification {
-        jsonrpc: "2.0",
-        method: "initialized",
-        params: Value::Null,
-    }
 }
 
 pub fn pretty_json<T: Serialize>(value: &T) -> anyhow::Result<String> {
@@ -77,7 +107,6 @@ pub fn session_handshake_pretty(editor: &helix_view::Editor) -> anyhow::Result<S
     let session = session::new_session(editor);
     let messages = [
         serde_json::to_value(initialize_request(1)?)?,
-        serde_json::to_value(initialized_notification())?,
         serde_json::to_value(new_session_request(2, session)?)?,
     ];
 
