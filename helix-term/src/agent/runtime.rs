@@ -2,6 +2,7 @@ use helix_event::runtime_local;
 use helix_view::editor::AgentLaunchConfig;
 use helix_view::DocumentId;
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use super::{
@@ -14,6 +15,8 @@ runtime_local! {
     static AGENT_TRANSCRIPT: Mutex<Option<DocumentId>> = Mutex::new(None);
     static AGENT_LATEST_PATCH: Mutex<Option<AgentPatchProposal>> = Mutex::new(None);
 }
+
+static AGENT_CANCEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 pub struct RunningAgent {
     pub name: String,
@@ -69,6 +72,18 @@ pub async fn stop() -> anyhow::Result<Option<String>> {
 
     running.process.kill().await?;
     Ok(Some(running.name))
+}
+
+pub fn cancel_generation() -> u64 {
+    AGENT_CANCEL_GENERATION.load(Ordering::Relaxed)
+}
+
+pub fn cancel_all() -> u64 {
+    AGENT_CANCEL_GENERATION.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+pub fn is_cancelled(generation: u64) -> bool {
+    cancel_generation() != generation
 }
 
 pub async fn recv_next() -> anyhow::Result<JsonRpcMessage> {

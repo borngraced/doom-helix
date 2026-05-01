@@ -25,6 +25,7 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "chat",
     "clear",
     "context",
+    "cancel",
     "edit",
     "explain",
     "fix",
@@ -649,6 +650,24 @@ fn stop_agent(cx: &mut compositor::Context) {
     });
 }
 
+fn cancel_agent(cx: &mut compositor::Context) {
+    crate::agent::runtime::cancel_all();
+    crate::agent::runtime::clear_latest_patch();
+    close_agent_patch_buffers(cx.editor);
+    let cancelled = cancel_agent_pending_turns(cx.editor);
+
+    cx.jobs.callback(async move {
+        let _ = crate::agent::runtime::stop().await;
+        Ok(job::Callback::Editor(Box::new(move |editor| {
+            if cancelled == 0 {
+                editor.set_status("Agent cancellation requested");
+            } else {
+                editor.set_status(format!("Agent cancelled {cancelled} pending turn(s)"));
+            }
+        })))
+    });
+}
+
 fn recv_agent(cx: &mut compositor::Context) {
     cx.jobs.callback(async move {
         let message = crate::agent::runtime::recv_next().await?;
@@ -1139,6 +1158,7 @@ fn prompt_agent_turn(
     let snapshot = crate::agent::context::current_snapshot(cx.editor);
     let patch_cwd = snapshot.workspace_root.clone();
     let patch_source_path = snapshot.active_file.path.clone();
+    let cancel_generation = crate::agent::runtime::cancel_generation();
     let meta = serde_json::json!({
         "helix": {
             "context": snapshot,
@@ -1160,6 +1180,12 @@ fn prompt_agent_turn(
         };
         helix_event::status::report(status).await;
         let turn = crate::agent::runtime::send_prompt_turn(prompt, Some(meta)).await?;
+        if crate::agent::runtime::is_cancelled(cancel_generation) {
+            let _ = crate::agent::runtime::stop().await;
+            return Ok(job::Callback::Editor(Box::new(|editor| {
+                editor.set_status("Ignored cancelled agent response");
+            })));
+        }
         let contents = agent_turn_response_markdown(&turn)?;
         let patch_stored = if store_patch {
             if let Some(patch) = extract_agent_patch(&contents) {
@@ -1305,6 +1331,40 @@ fn replace_agent_pending_transcript_editor(
 
 fn agent_pending_marker(id: u64) -> String {
     format!("Working... [turn {id}]")
+}
+
+fn cancel_agent_pending_turns(editor: &mut Editor) -> usize {
+    let Some(doc_id) = crate::agent::runtime::transcript_doc_id()
+        .filter(|doc_id| editor.document(*doc_id).is_some())
+    else {
+        return 0;
+    };
+
+    let view_id = prepare_agent_transcript_doc(editor, doc_id, Action::Replace);
+    let doc = doc_mut!(editor, &doc_id);
+    let text = doc.text().slice(..).to_string();
+    let mut changes = Vec::new();
+    let mut search_start = 0;
+
+    while let Some(relative_start) = text[search_start..].find("Working... [turn ") {
+        let start_byte = search_start + relative_start;
+        let Some(relative_end) = text[start_byte..].find(']') else {
+            break;
+        };
+        let end_byte = start_byte + relative_end + 1;
+        let start = doc.text().byte_to_char(start_byte);
+        let end = doc.text().byte_to_char(end_byte);
+        changes.push((start, end, Some("Cancelled".into())));
+        search_start = end_byte;
+    }
+
+    let cancelled = changes.len();
+    if cancelled > 0 {
+        let transaction = Transaction::change(doc.text(), changes.into_iter());
+        doc.apply(&transaction, view_id);
+    }
+
+    cancelled
 }
 
 fn find_doc_text_char_range(doc: &helix_view::Document, needle: &str) -> Option<(usize, usize)> {
@@ -1638,6 +1698,10 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("acp") => open_agent_acp_handshake(cx),
         Some("launch-config") => open_agent_launch_config(cx),
         Some("start") => start_agent(cx),
+        Some("cancel") => {
+            cancel_agent(cx);
+            Ok(())
+        }
         Some("stop") => {
             stop_agent(cx);
             Ok(())
