@@ -1234,14 +1234,20 @@ fn agent_prompt_with_formatting(
     format!("{prompt}\n\n{format_rules}\n- Current language id: `{language}`.")
 }
 
-fn visible_agent_prompt(kind: crate::agent::runtime::AgentTranscriptKind, prompt: &str) -> String {
-    match kind {
+fn visible_agent_prompt(
+    snapshot: &crate::agent::context::EditorSnapshot,
+    kind: crate::agent::runtime::AgentTranscriptKind,
+    prompt: &str,
+) -> String {
+    let base = match kind {
         crate::agent::runtime::AgentTranscriptKind::Chat => prompt.trim().to_string(),
         crate::agent::runtime::AgentTranscriptKind::Explain => "Explain".to_string(),
         crate::agent::runtime::AgentTranscriptKind::Fix => "Fix".to_string(),
         crate::agent::runtime::AgentTranscriptKind::Refactor => "Refactor".to_string(),
         crate::agent::runtime::AgentTranscriptKind::Edit => "Edit".to_string(),
-    }
+    };
+
+    crate::agent::context::prompt_with_primary_selection_snapshot(snapshot, &base)
 }
 
 fn prompt_agent_turn(
@@ -1253,7 +1259,7 @@ fn prompt_agent_turn(
     let launch_config = cx.editor.config().agent.launch_config()?;
     let handshake = crate::agent::acp::session_handshake(cx.editor)?;
     let snapshot = crate::agent::context::current_snapshot(cx.editor);
-    let transcript_prompt = visible_agent_prompt(kind, prompt.trim());
+    let transcript_prompt = visible_agent_prompt(&snapshot, kind, prompt.trim());
     let prompt =
         agent_prompt_with_formatting(kind, &prompt, snapshot.active_file.language_id.as_deref());
     let prompt = crate::agent::context::prompt_with_editor_context_snapshot(&snapshot, &prompt);
