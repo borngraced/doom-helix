@@ -84,6 +84,11 @@ impl AgentProcess {
     pub async fn wait(&mut self) -> anyhow::Result<std::process::ExitStatus> {
         Ok(self.child.wait().await?)
     }
+
+    pub async fn kill(&mut self) -> anyhow::Result<()> {
+        self.child.kill().await?;
+        Ok(())
+    }
 }
 
 pub fn encode_content_length_message<T: Serialize>(message: &T) -> anyhow::Result<Vec<u8>> {

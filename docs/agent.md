@@ -34,6 +34,10 @@ Starts the configured ACP agent process and sends the initial session handshake.
 
 Reports whether an agent process is currently registered as running.
 
+`:agent stop`
+
+Stops the registered agent process and clears the runtime slot.
+
 `:agent-context`
 
 Compatibility command that opens the same context snapshot directly.

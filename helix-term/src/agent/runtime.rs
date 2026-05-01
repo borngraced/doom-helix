@@ -31,6 +31,20 @@ pub async fn start(
     Ok(())
 }
 
+pub async fn stop() -> anyhow::Result<Option<String>> {
+    let running = {
+        let mut agent = AGENT_RUNTIME.lock().expect("agent runtime lock poisoned");
+        agent.take()
+    };
+
+    let Some(mut running) = running else {
+        return Ok(None);
+    };
+
+    running.process.kill().await?;
+    Ok(Some(running.name))
+}
+
 pub fn status() -> AgentRuntimeStatus {
     let agent = AGENT_RUNTIME.lock().expect("agent runtime lock poisoned");
     match agent.as_ref() {

@@ -611,6 +611,19 @@ fn start_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn stop_agent(cx: &mut compositor::Context) {
+    cx.jobs.callback(async move {
+        let stopped = crate::agent::runtime::stop().await?;
+        Ok(job::Callback::Editor(Box::new(move |editor| {
+            if let Some(name) = stopped {
+                editor.set_status(format!("Agent '{name}' stopped"));
+            } else {
+                editor.set_status("No agent is running");
+            }
+        })))
+    });
+}
+
 fn show_agent_status(cx: &mut compositor::Context) {
     match crate::agent::runtime::status() {
         crate::agent::runtime::AgentRuntimeStatus::Running { name } => {
@@ -647,6 +660,10 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("acp") => open_agent_acp_handshake(cx),
         Some("launch-config") => open_agent_launch_config(cx),
         Some("start") => start_agent(cx),
+        Some("stop") => {
+            stop_agent(cx);
+            Ok(())
+        }
         Some("status") => {
             show_agent_status(cx);
             Ok(())
