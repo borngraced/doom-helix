@@ -571,15 +571,7 @@ fn new_file(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> an
     Ok(())
 }
 
-fn agent_context(
-    cx: &mut compositor::Context,
-    _args: Args,
-    event: PromptEvent,
-) -> anyhow::Result<()> {
-    if event != PromptEvent::Validate {
-        return Ok(());
-    }
-
+fn open_agent_context(cx: &mut compositor::Context) -> anyhow::Result<()> {
     let snapshot = crate::agent::context::current_snapshot_pretty(cx.editor)?;
     let doc_id = cx.editor.new_file(Action::HorizontalSplit);
     let view_id = view!(cx.editor).id;
@@ -592,6 +584,29 @@ fn agent_context(
     doc.set_language_by_language_id("json", &loader).ok();
 
     Ok(())
+}
+
+fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    match args.first() {
+        None | Some("context") => open_agent_context(cx),
+        Some(command) => bail!("unknown agent command: {command}"),
+    }
+}
+
+fn agent_context(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    open_agent_context(cx)
 }
 
 fn format(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
@@ -3124,6 +3139,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "agent",
+        aliases: &[],
+        doc: "Run an agent command. With no subcommand, opens the current context snapshot.",
+        fun: agent,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(1)),
             ..Signature::DEFAULT
         },
     },
