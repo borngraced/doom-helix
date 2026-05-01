@@ -813,12 +813,16 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
                         match input.trim().to_ascii_lowercase().as_str() {
                             "y" | "yes" => {
                                 let apply_cwd = apply_cwd.clone();
-                                let patch =
+                                let original_patch = patch.clone();
+                                let normalized_patch =
                                     normalize_patch_paths_for_apply(&patch, &apply_cwd);
                                 cx.editor.set_status("Applying agent patch...");
                                 cx.jobs.callback(async move {
-                                    let result =
-                                        apply_agent_patch_with_git(patch.clone(), apply_cwd).await;
+                                    let result = apply_agent_patch_with_git(
+                                        normalized_patch.clone(),
+                                        apply_cwd.clone(),
+                                    )
+                                    .await;
                                     Ok(job::Callback::Editor(Box::new(move |editor| {
                                         match result {
                                             Ok(()) => {
@@ -835,8 +839,12 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
                                                 }
                                             }
                                             Err(error) => {
-                                                let diagnostics =
-                                                    agent_patch_apply_diagnostics(&error, &patch);
+                                                let diagnostics = agent_patch_apply_diagnostics(
+                                                    &error,
+                                                    &apply_cwd,
+                                                    &original_patch,
+                                                    &normalized_patch,
+                                                );
                                                 if let Err(open_error) = open_agent_scratch_editor(
                                                     editor,
                                                     diagnostics,
@@ -865,11 +873,24 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
     });
 }
 
-fn agent_patch_apply_diagnostics(error: &anyhow::Error, patch: &str) -> String {
+fn agent_patch_apply_diagnostics(
+    error: &anyhow::Error,
+    cwd: &Path,
+    original_patch: &str,
+    normalized_patch: &str,
+) -> String {
+    let normalized_section = if original_patch.trim() == normalized_patch.trim() {
+        "No path normalization was applied.".to_string()
+    } else {
+        format!("```diff\n{}\n```", normalized_patch.trim())
+    };
+
     format!(
-        "# Agent Patch Apply Failed\n\n{}\n\n## Patch Helix Tried To Apply\n\n```diff\n{}\n```\n",
+        "# Agent Patch Apply Failed\n\n{}\n\n## Apply Cwd\n\n`{}`\n\n## Original Codex Patch\n\n```diff\n{}\n```\n\n## Normalized Patch Sent To Git\n\n{}\n",
         error,
-        patch.trim()
+        cwd.display(),
+        original_patch.trim(),
+        normalized_section,
     )
 }
 
