@@ -1,7 +1,7 @@
 use std::fmt::Write;
 use std::io::BufReader;
 use std::ops::{self, Deref};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::job::Job;
@@ -812,8 +812,9 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
 
                         match input.trim().to_ascii_lowercase().as_str() {
                             "y" | "yes" => {
-                                let patch = patch.clone();
                                 let apply_cwd = apply_cwd.clone();
+                                let patch =
+                                    normalize_patch_paths_for_apply(&patch, &apply_cwd);
                                 cx.editor.set_status("Applying agent patch...");
                                 cx.jobs.callback(async move {
                                     let result =
@@ -875,6 +876,94 @@ fn agent_patch_apply_diagnostics(error: &anyhow::Error, patch: &str) -> String {
 async fn apply_agent_patch_with_git(patch: String, cwd: PathBuf) -> anyhow::Result<()> {
     run_git_apply(&patch, &cwd, true).await?;
     run_git_apply(&patch, &cwd, false).await
+}
+
+fn normalize_patch_paths_for_apply(patch: &str, cwd: &Path) -> String {
+    patch
+        .lines()
+        .map(|line| {
+            if let Some(rest) = line.strip_prefix("diff --git ") {
+                let paths = rest.split_whitespace().collect::<Vec<_>>();
+                if paths.len() == 2 {
+                    return format!(
+                        "diff --git {} {}",
+                        normalize_patch_path_token(paths[0], cwd),
+                        normalize_patch_path_token(paths[1], cwd)
+                    );
+                }
+            }
+
+            if line.starts_with("--- ") || line.starts_with("+++ ") {
+                return normalize_patch_file_header(line, cwd);
+            }
+
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_patch_file_header(line: &str, cwd: &Path) -> String {
+    let (prefix, rest) = line.split_at(4);
+    let split_at = rest
+        .char_indices()
+        .find_map(|(index, char)| char.is_whitespace().then_some(index));
+    let Some(split_at) = split_at else {
+        return format!("{prefix}{}", normalize_patch_path_token(rest, cwd));
+    };
+    let (path, suffix) = rest.split_at(split_at);
+    format!(
+        "{prefix}{}{}",
+        normalize_patch_path_token(path, cwd),
+        suffix
+    )
+}
+
+fn normalize_patch_path_token(token: &str, cwd: &Path) -> String {
+    if token == "/dev/null" {
+        return token.to_string();
+    }
+
+    let (prefix, path) = match token
+        .strip_prefix("a/")
+        .map(|path| ("a/", path))
+        .or_else(|| token.strip_prefix("b/").map(|path| ("b/", path)))
+    {
+        Some((prefix, path)) => (prefix, path),
+        None => ("", token),
+    };
+
+    let relative = normalize_patch_relative_path(path, cwd);
+    format!("{prefix}{}", relative.display())
+}
+
+fn normalize_patch_relative_path(path: &str, cwd: &Path) -> PathBuf {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        return path
+            .strip_prefix(cwd)
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|_| path.to_path_buf());
+    }
+
+    if cwd.join(path).exists()
+        || cwd
+            .join(path.parent().unwrap_or_else(|| Path::new("")))
+            .exists()
+    {
+        return path.to_path_buf();
+    }
+
+    let components = path.components().collect::<Vec<_>>();
+    for index in 1..components.len() {
+        let candidate = components[index..].iter().collect::<PathBuf>();
+        let candidate_parent = candidate.parent().unwrap_or_else(|| Path::new(""));
+        if cwd.join(&candidate).exists() || cwd.join(candidate_parent).exists() {
+            return candidate;
+        }
+    }
+
+    path.to_path_buf()
 }
 
 async fn run_git_apply(patch: &str, cwd: &PathBuf, check: bool) -> anyhow::Result<()> {
