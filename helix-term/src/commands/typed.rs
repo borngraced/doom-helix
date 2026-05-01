@@ -730,8 +730,10 @@ fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Re
             "context": crate::agent::context::current_snapshot(cx.editor),
         }
     });
+    cx.editor.set_status("Agent is thinking...");
 
     cx.jobs.callback(async move {
+        helix_event::status::report("Agent request sent to Codex...").await;
         let turn = crate::agent::runtime::send_prompt_turn(prompt, Some(meta)).await?;
         let contents = agent_turn_markdown(&turn)?;
         let request_id = turn.request_id;
