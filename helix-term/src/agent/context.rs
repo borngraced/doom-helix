@@ -121,8 +121,13 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
     } else {
         doc
     };
+    let snapshot_view_id = if doc.selections().contains_key(&view.id) {
+        view.id
+    } else {
+        doc.selections().keys().next().copied().unwrap_or(view.id)
+    };
     let text = doc.text().slice(..);
-    let selection = doc.selection(view.id);
+    let selection = doc.selection(snapshot_view_id);
     let primary = selection.primary();
     let cursor = coords_at_pos(text, primary.head);
     let cwd = helix_stdx::env::current_working_dir();
@@ -130,7 +135,7 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         .path()
         .map(|path| helix_loader::find_workspace_in(path).0)
         .unwrap_or_else(|| helix_loader::find_workspace().0);
-    let view_offset = doc.view_offset(view.id);
+    let view_offset = doc.view_offset(snapshot_view_id);
     let visible_start = coords_at_pos(text, view_offset.anchor).row;
     let visible_end = visible_start.saturating_add(view.area.height as usize);
 
