@@ -14,6 +14,8 @@ runtime_local! {
 pub struct RunningAgent {
     pub name: String,
     pub process: AgentProcess,
+    pub session_id: Option<String>,
+    pub next_request_id: u64,
 }
 
 pub async fn start(
@@ -33,6 +35,8 @@ pub async fn start(
     *agent = Some(RunningAgent {
         name: launch_config.name,
         process,
+        session_id: None,
+        next_request_id: 3,
     });
 
     Ok(())
@@ -53,8 +57,30 @@ pub async fn recv_next() -> anyhow::Result<JsonRpcMessage> {
     };
 
     let message = running.process.recv().await;
+    if let Ok(message) = &message {
+        update_session_id(&mut running, message);
+    }
     restore_running_agent(running);
     message
+}
+
+pub async fn send_prompt(prompt: String) -> anyhow::Result<u64> {
+    let Some(mut running) = take_running_agent() else {
+        anyhow::bail!("no agent is running");
+    };
+
+    let Some(session_id) = running.session_id.clone() else {
+        restore_running_agent(running);
+        anyhow::bail!("agent session id is not known yet; run :agent recv after :agent start");
+    };
+
+    let request_id = running.next_request_id;
+    running.next_request_id += 1;
+    let request = super::acp::prompt_request(request_id, session_id, prompt)?;
+    let send_result = running.process.send(&request).await;
+    restore_running_agent(running);
+    send_result?;
+    Ok(request_id)
 }
 
 fn take_running_agent() -> Option<RunningAgent> {
@@ -81,4 +107,25 @@ pub fn status() -> AgentRuntimeStatus {
 pub enum AgentRuntimeStatus {
     Running { name: String },
     Stopped,
+}
+
+fn update_session_id(agent: &mut RunningAgent, message: &JsonRpcMessage) {
+    let JsonRpcMessage::Response(response) = message else {
+        return;
+    };
+
+    if response.id != 2 {
+        return;
+    }
+
+    let Some(session_id) = response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("sessionId"))
+        .and_then(|session_id| session_id.as_str())
+    else {
+        return;
+    };
+
+    agent.session_id = Some(session_id.to_string());
 }

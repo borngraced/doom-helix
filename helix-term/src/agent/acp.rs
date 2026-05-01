@@ -102,6 +102,19 @@ pub struct NewSessionParams {
     pub meta: Value,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptParams {
+    pub session_id: String,
+    pub prompt: Vec<ContentBlock>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentBlock {
+    Text { text: String },
+}
+
 pub fn initialize_request(id: u64) -> anyhow::Result<JsonRpcRequest> {
     Ok(JsonRpcRequest {
         jsonrpc: "2.0",
@@ -138,6 +151,22 @@ pub fn new_session_request(id: u64, session: AgentSession) -> anyhow::Result<Jso
                     "session": session,
                 }
             }),
+        })?,
+    })
+}
+
+pub fn prompt_request(
+    id: u64,
+    session_id: String,
+    prompt: String,
+) -> anyhow::Result<JsonRpcRequest> {
+    Ok(JsonRpcRequest {
+        jsonrpc: "2.0",
+        id,
+        method: "session/prompt",
+        params: serde_json::to_value(PromptParams {
+            session_id,
+            prompt: vec![ContentBlock::Text { text: prompt }],
         })?,
     })
 }

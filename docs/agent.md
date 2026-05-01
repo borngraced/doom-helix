@@ -42,6 +42,10 @@ Stops the registered agent process and clears the runtime slot.
 
 Reads one framed JSON-RPC message from the running agent process and opens it in a JSON scratch buffer.
 
+`:agent prompt <text>`
+
+Sends a `session/prompt` request to the running agent. After `:agent start`, run `:agent recv` once to capture the `session/new` response and session id before sending prompts.
+
 `:agent-context`
 
 Compatibility command that opens the same context snapshot directly.

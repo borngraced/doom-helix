@@ -636,6 +636,15 @@ fn recv_agent(cx: &mut compositor::Context) {
     });
 }
 
+fn prompt_agent(cx: &mut compositor::Context, prompt: String) {
+    cx.jobs.callback(async move {
+        let request_id = crate::agent::runtime::send_prompt(prompt).await?;
+        Ok(job::Callback::Editor(Box::new(move |editor| {
+            editor.set_status(format!("Sent agent prompt request #{request_id}"));
+        })))
+    });
+}
+
 fn show_agent_status(cx: &mut compositor::Context) {
     match crate::agent::runtime::status() {
         crate::agent::runtime::AgentRuntimeStatus::Running { name } => {
@@ -682,6 +691,15 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         }
         Some("recv") => {
             recv_agent(cx);
+            Ok(())
+        }
+        Some("prompt") => {
+            let prompt = args
+                .get(1)
+                .map(str::trim)
+                .filter(|prompt| !prompt.is_empty())
+                .context("agent prompt requires text")?;
+            prompt_agent(cx, prompt.to_string());
             Ok(())
         }
         Some("status") => {
