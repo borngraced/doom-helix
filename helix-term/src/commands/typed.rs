@@ -1355,6 +1355,13 @@ fn prompt_agent_turn(
                     {
                         editor.set_error(err.to_string());
                     } else {
+                        let (_reloaded, skipped) = reload_unmodified_file_documents(editor);
+                        if skipped > 0 {
+                            editor.set_status(format!(
+                                "{status}; skipped {skipped} modified buffer(s)"
+                            ));
+                            return;
+                        }
                         editor.set_status(status);
                     }
                 }
