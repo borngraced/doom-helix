@@ -467,6 +467,10 @@ pub struct AgentLaunchConfig {
 
 impl AgentConfig {
     pub fn launch_config(&self) -> anyhow::Result<AgentLaunchConfig> {
+        if !self.enable {
+            anyhow::bail!("agent integration is disabled; set editor.agent.enable = true");
+        }
+
         let server = self.servers.get(&self.default_agent).ok_or_else(|| {
             anyhow::anyhow!("agent server '{}' is not configured", self.default_agent)
         })?;
@@ -2631,6 +2635,7 @@ mod agent_config_tests {
     fn resolves_launch_config() {
         let config: AgentConfig = toml::from_str(
             r#"
+            enable = true
             default-agent = "local"
 
             [servers.local]
@@ -2647,9 +2652,26 @@ mod agent_config_tests {
     }
 
     #[test]
+    fn rejects_disabled_agent_config() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            enable = false
+            default-agent = "local"
+
+            [servers.local]
+            command = "agent"
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.launch_config().is_err());
+    }
+
+    #[test]
     fn rejects_missing_default_agent() {
         let config: AgentConfig = toml::from_str(
             r#"
+            enable = true
             default-agent = "missing"
 
             [servers.local]

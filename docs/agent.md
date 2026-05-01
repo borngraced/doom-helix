@@ -91,7 +91,7 @@ The fork supports an experimental `[editor.agent]` table:
 ```toml
 [editor.agent]
 enable = true
-default-agent = "codex"
+default-agent = "local"
 auto-context-on-open = true
 include-theme = true
 include-command-history = true
@@ -99,12 +99,13 @@ include-visible-buffer = true
 include-diagnostics = true
 require-approval-for-shell = true
 
-[editor.agent.servers.codex]
-command = "codex"
-args = ["acp"]
+[editor.agent.servers.local]
+command = "your-acp-agent"
+args = []
 ```
 
 The process-spawning layer resolves the configured `default-agent` from this table.
+Agent launch commands must speak ACP over stdio using `Content-Length` framed JSON-RPC. The local Codex CLI currently available in this environment does not expose a `codex acp` subcommand; configuring `codex acp` here will print Codex help and close stdout.
 
 ## Near-Term Direction
 
