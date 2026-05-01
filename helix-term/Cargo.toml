@@ -54,7 +54,7 @@ termina = { workspace = true, features = ["event-stream"] }
 signal-hook = "0.4"
 tokio-stream = "0.1"
 futures-util = { version = "0.3", features = ["std", "async-await", "sink"], default-features = false }
-tokio-tungstenite = "0.26"
+tokio-tungstenite = "0.29"
 arc-swap.workspace = true
 termini = "1"
 indexmap = { version = "2.14", features = ["serde"] }
