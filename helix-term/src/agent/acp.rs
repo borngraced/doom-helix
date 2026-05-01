@@ -29,9 +29,10 @@ pub enum JsonRpcMessage {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct JsonRpcResponse {
     pub jsonrpc: Option<String>,
-    pub id: u64,
+    pub id: Value,
     #[serde(default)]
     pub result: Option<Value>,
     #[serde(default)]
@@ -47,15 +48,17 @@ pub struct JsonRpcError {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct JsonRpcInboundRequest {
     pub jsonrpc: Option<String>,
-    pub id: u64,
+    pub id: Value,
     pub method: String,
     #[serde(default)]
     pub params: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct JsonRpcInboundNotification {
     pub jsonrpc: Option<String>,
     pub method: String,
@@ -272,5 +275,23 @@ mod tests {
             request.params["_meta"]["helix"]["context"]["theme"],
             "base16_default"
         );
+    }
+
+    #[test]
+    fn parses_string_id_inbound_request() {
+        let message: JsonRpcMessage = serde_json::from_value(json!({
+            "jsonrpc": "2.0",
+            "id": "permission-1",
+            "method": "session/request_permission",
+            "params": {}
+        }))
+        .unwrap();
+
+        let JsonRpcMessage::Request(request) = message else {
+            panic!("expected request");
+        };
+
+        assert_eq!(request.id, json!("permission-1"));
+        assert_eq!(request.method, "session/request_permission");
     }
 }

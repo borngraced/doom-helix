@@ -181,7 +181,8 @@ where
             let _ = running.process.kill().await;
             anyhow::bail!(message);
         }
-        if matches!(&message, JsonRpcMessage::Response(response) if response.id == 2) {
+        if matches!(&message, JsonRpcMessage::Response(response) if json_rpc_id_eq(&response.id, 2))
+        {
             session_response = Some(serde_json::to_value(&message)?);
         }
         messages.push(message);
@@ -209,7 +210,7 @@ where
                 running.process.send(&response).await?;
                 continue;
             }
-            let mode_set_done = matches!(&message, JsonRpcMessage::Response(response) if response.id == mode_request_id);
+            let mode_set_done = matches!(&message, JsonRpcMessage::Response(response) if json_rpc_id_eq(&response.id, mode_request_id));
             update_session_id(&mut running, &message);
             on_message(&message);
             messages.push(message);
@@ -238,8 +239,7 @@ where
             running.process.send(&response).await?;
             continue;
         }
-        let turn_done =
-            matches!(&message, JsonRpcMessage::Response(response) if response.id == request_id);
+        let turn_done = matches!(&message, JsonRpcMessage::Response(response) if json_rpc_id_eq(&response.id, request_id));
         update_session_id(&mut running, &message);
         on_message(&message);
         messages.push(message);
@@ -282,7 +282,7 @@ async fn handle_agent_request(message: &JsonRpcMessage) -> anyhow::Result<Option
             );
             Ok(Some(serde_json::json!({
                 "jsonrpc": "2.0",
-                "id": request.id,
+                "id": request.id.clone(),
                 "result": {
                     "outcome": {
                         "outcome": "selected",
@@ -309,7 +309,7 @@ async fn handle_agent_request(message: &JsonRpcMessage) -> anyhow::Result<Option
             );
             Ok(Some(serde_json::json!({
                 "jsonrpc": "2.0",
-                "id": request.id,
+                "id": request.id.clone(),
                 "result": {
                     "decision": decision
                 }
@@ -328,7 +328,7 @@ async fn handle_agent_request(message: &JsonRpcMessage) -> anyhow::Result<Option
             );
             Ok(Some(serde_json::json!({
                 "jsonrpc": "2.0",
-                "id": request.id,
+                "id": request.id.clone(),
                 "error": {
                     "code": -32601,
                     "message": format!("unsupported agent request: {method}")
@@ -847,7 +847,7 @@ fn update_session_id(agent: &mut RunningAgent, message: &JsonRpcMessage) {
         return;
     };
 
-    if response.id != 2 {
+    if !json_rpc_id_eq(&response.id, 2) {
         return;
     }
 
@@ -868,7 +868,7 @@ fn session_new_failure_message(message: &JsonRpcMessage) -> Option<String> {
         return None;
     };
 
-    if response.id != 2 {
+    if !json_rpc_id_eq(&response.id, 2) {
         return None;
     }
 
@@ -886,6 +886,14 @@ fn session_new_failure_message(message: &JsonRpcMessage) -> Option<String> {
         Some(error) => format!("agent session/new failed: {}", error.message),
         None => "agent session/new response did not include a sessionId".to_string(),
     })
+}
+
+fn json_rpc_id_eq(id: &Value, expected: u64) -> bool {
+    id.as_u64().is_some_and(|id| id == expected)
+        || id
+            .as_str()
+            .and_then(|id| id.parse::<u64>().ok())
+            .is_some_and(|id| id == expected)
 }
 
 fn log_agent_message(phase: &str, message: &JsonRpcMessage) {
