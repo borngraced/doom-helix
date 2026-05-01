@@ -12,6 +12,7 @@ use super::{
 runtime_local! {
     static AGENT_RUNTIME: Mutex<Option<RunningAgent>> = Mutex::new(None);
     static AGENT_TRANSCRIPT: Mutex<Option<DocumentId>> = Mutex::new(None);
+    static AGENT_LATEST_PATCH: Mutex<Option<String>> = Mutex::new(None);
 }
 
 pub struct RunningAgent {
@@ -234,6 +235,19 @@ pub fn set_transcript_doc_id(doc_id: DocumentId) {
     *AGENT_TRANSCRIPT
         .lock()
         .expect("agent transcript lock poisoned") = Some(doc_id);
+}
+
+pub fn latest_patch() -> Option<String> {
+    AGENT_LATEST_PATCH
+        .lock()
+        .expect("agent latest patch lock poisoned")
+        .clone()
+}
+
+pub fn set_latest_patch(patch: String) {
+    *AGENT_LATEST_PATCH
+        .lock()
+        .expect("agent latest patch lock poisoned") = Some(patch);
 }
 
 fn update_session_id(agent: &mut RunningAgent, message: &JsonRpcMessage) {

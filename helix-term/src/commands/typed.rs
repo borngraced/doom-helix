@@ -19,6 +19,7 @@ use ui::completers::{self, Completer};
 
 const AGENT_SUBCOMMANDS: &[&str] = &[
     "ask",
+    "apply",
     "chat",
     "clear",
     "context",
@@ -30,6 +31,7 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "acp",
     "launch-config",
     "panel",
+    "patch",
     "start",
     "status",
     "stop",
@@ -695,7 +697,7 @@ fn chat_agent(cx: &mut compositor::Context) {
                             return;
                         }
 
-                        if let Err(err) = prompt_agent_turn(cx, input.to_string()) {
+                        if let Err(err) = prompt_agent_turn(cx, input.to_string(), false) {
                             cx.editor.set_error(err.to_string());
                         }
                     },
@@ -708,7 +710,7 @@ fn chat_agent(cx: &mut compositor::Context) {
 }
 
 fn explain_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
-    prompt_agent_turn(cx, "Explain this selected code.".to_string())
+    prompt_agent_turn(cx, "Explain this selected code.".to_string(), false)
 }
 
 fn fix_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
@@ -716,6 +718,7 @@ fn fix_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
         cx,
         "Find the bug or problem in this selected code and propose a fix. Do not edit files yet."
             .to_string(),
+        false,
     )
 }
 
@@ -723,6 +726,7 @@ fn refactor_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
     prompt_agent_turn(
         cx,
         "Suggest a clean refactor for this selected code. Do not edit files yet.".to_string(),
+        false,
     )
 }
 
@@ -731,6 +735,7 @@ fn edit_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
         cx,
         "Propose an edit for this selected code. Return a unified diff patch only, with enough surrounding context to review. Do not modify files."
             .to_string(),
+        true,
     )
 }
 
@@ -738,7 +743,7 @@ fn open_agent_panel(cx: &mut compositor::Context) {
     let position = cx.editor.config().agent.panel_position;
     let action = agent_panel_action(position);
     let (doc_id, created) = agent_transcript_doc_id(cx.editor, action);
-    prepare_agent_transcript_doc(cx.editor, doc_id);
+    prepare_agent_transcript_doc(cx.editor, doc_id, action);
     if created {
         place_agent_panel(cx.editor, position);
     }
@@ -753,12 +758,91 @@ fn clear_agent_panel(cx: &mut compositor::Context) {
         return;
     };
 
-    let view_id = prepare_agent_transcript_doc(cx.editor, doc_id);
+    let view_id = prepare_agent_transcript_doc(cx.editor, doc_id, Action::Replace);
     let doc = doc_mut!(cx.editor, &doc_id);
     let transaction = Transaction::delete(doc.text(), [(0, doc.text().len_chars())].into_iter());
     doc.apply(&transaction, view_id);
     doc.set_selection(view_id, Selection::point(0));
     cx.editor.set_status("Agent transcript cleared");
+}
+
+fn open_agent_patch(cx: &mut compositor::Context) -> anyhow::Result<()> {
+    let Some(patch) = crate::agent::runtime::latest_patch() else {
+        cx.editor.set_error("No agent patch proposal is available");
+        return Ok(());
+    };
+
+    open_agent_scratch_editor(cx.editor, patch, "diff")
+}
+
+fn apply_agent_patch(cx: &mut compositor::Context) {
+    let Some(patch) = crate::agent::runtime::latest_patch() else {
+        cx.editor.set_error("No agent patch proposal is available");
+        return;
+    };
+
+    cx.jobs.callback(async move {
+        Ok(job::Callback::EditorCompositor(Box::new(
+            move |_editor, compositor| {
+                let patch = patch.clone();
+                let prompt = ui::Prompt::new(
+                    "apply latest agent patch? [y/N] ".into(),
+                    None,
+                    |_editor, _input| Vec::new(),
+                    move |cx, input, event| {
+                        if event != PromptEvent::Validate {
+                            return;
+                        }
+
+                        match input.trim().to_ascii_lowercase().as_str() {
+                            "y" | "yes" => {
+                                let patch = patch.clone();
+                                cx.editor.set_status("Applying agent patch...");
+                                cx.jobs.callback(async move {
+                                    apply_agent_patch_with_git(patch).await?;
+                                    Ok(job::Callback::Editor(Box::new(|editor| {
+                                        editor.set_status("Agent patch applied");
+                                    })))
+                                });
+                            }
+                            _ => cx.editor.set_status("Agent patch apply cancelled"),
+                        }
+                    },
+                );
+                compositor.push(Box::new(prompt));
+            },
+        )))
+    });
+}
+
+async fn apply_agent_patch_with_git(patch: String) -> anyhow::Result<()> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+    use tokio::process::Command;
+
+    let mut child = Command::new("git")
+        .arg("apply")
+        .arg("--whitespace=nowarn")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    child
+        .stdin
+        .take()
+        .expect("git apply stdin is piped")
+        .write_all(patch.as_bytes())
+        .await?;
+
+    let output = child.wait_with_output().await?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    anyhow::bail!("git apply failed: {}", stderr.trim());
 }
 
 fn agent_panel_action(position: AgentPanelPosition) -> Action {
@@ -778,7 +862,11 @@ fn place_agent_panel(editor: &mut Editor, position: AgentPanelPosition) {
     }
 }
 
-fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Result<()> {
+fn prompt_agent_turn(
+    cx: &mut compositor::Context,
+    prompt: String,
+    store_patch: bool,
+) -> anyhow::Result<()> {
     let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
     let launch_config = cx.editor.config().agent.launch_config()?;
     let handshake = crate::agent::acp::session_handshake(cx.editor)?;
@@ -800,6 +888,9 @@ fn prompt_agent_turn(cx: &mut compositor::Context, prompt: String) -> anyhow::Re
         helix_event::status::report(status).await;
         let turn = crate::agent::runtime::send_prompt_turn(prompt, Some(meta)).await?;
         let contents = agent_turn_response_markdown(&turn)?;
+        if store_patch {
+            crate::agent::runtime::set_latest_patch(extract_agent_patch(&contents));
+        }
         let request_id = turn.request_id;
         Ok(job::Callback::Editor(Box::new(move |editor| {
             if let Err(err) =
@@ -855,7 +946,7 @@ fn append_agent_pending_transcript_editor(
     let position = editor.config().agent.panel_position;
     let action = agent_panel_action(position);
     let (doc_id, created) = agent_transcript_doc_id(editor, action);
-    let view_id = prepare_agent_transcript_doc(editor, doc_id);
+    let view_id = prepare_agent_transcript_doc(editor, doc_id, action);
     if created {
         place_agent_panel(editor, position);
     }
@@ -892,7 +983,9 @@ fn replace_agent_pending_transcript_editor(
         let _ = append_agent_pending_transcript_editor(editor, "(original prompt unavailable)")?;
     }
 
-    let view_id = prepare_agent_transcript_doc(editor, pending_range.doc_id);
+    let position = editor.config().agent.panel_position;
+    let action = agent_panel_action(position);
+    let view_id = prepare_agent_transcript_doc(editor, pending_range.doc_id, action);
     let doc = doc_mut!(editor, &pending_range.doc_id);
     let replacement = format!("{}\n", contents.trim());
     let transaction = Transaction::change(
@@ -929,12 +1022,62 @@ fn agent_transcript_doc_id(editor: &mut Editor, action: Action) -> (helix_view::
 fn prepare_agent_transcript_doc(
     editor: &mut Editor,
     doc_id: helix_view::DocumentId,
+    action: Action,
 ) -> helix_view::ViewId {
-    editor.switch(doc_id, Action::Replace);
+    if let Some(view_id) = focus_existing_agent_transcript_doc(editor, doc_id) {
+        return view_id;
+    }
+
+    editor.switch(doc_id, action);
     let view_id = view!(editor).id;
     let doc = doc_mut!(editor, &doc_id);
     doc.ensure_view_init(view_id);
     view_id
+}
+
+fn focus_existing_agent_transcript_doc(
+    editor: &mut Editor,
+    doc_id: helix_view::DocumentId,
+) -> Option<helix_view::ViewId> {
+    let transcript_views: Vec<_> = editor
+        .tree
+        .views()
+        .filter(|(view, _)| view.doc == doc_id)
+        .map(|(view, focused)| (view.id, focused, view.docs_access_history.clone()))
+        .collect();
+
+    if transcript_views.is_empty() {
+        return None;
+    }
+
+    let keep_view_id = transcript_views
+        .iter()
+        .find(|(_, _, history)| history.is_empty())
+        .or_else(|| transcript_views.iter().find(|(_, focused, _)| *focused))
+        .map(|(view_id, _, _)| *view_id)
+        .unwrap_or(transcript_views[0].0);
+
+    for (view_id, _, history) in transcript_views {
+        if view_id == keep_view_id {
+            continue;
+        }
+
+        if let Some(prev_doc_id) =
+            history.iter().rev().copied().find(|prev_doc_id| {
+                *prev_doc_id != doc_id && editor.document(*prev_doc_id).is_some()
+            })
+        {
+            editor.tree.focus = view_id;
+            editor.switch(prev_doc_id, Action::Replace);
+        } else if editor.tree.views().count() > 1 {
+            editor.close(view_id);
+        }
+    }
+
+    editor.tree.focus = keep_view_id;
+    let doc = doc_mut!(editor, &doc_id);
+    doc.ensure_view_init(keep_view_id);
+    Some(keep_view_id)
 }
 
 fn insert_agent_transcript_text(
@@ -1014,6 +1157,37 @@ fn agent_turn_response_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyh
     Ok(response.trim().to_string())
 }
 
+fn extract_agent_patch(response: &str) -> String {
+    let mut in_fence = false;
+    let mut fence_is_diff = false;
+    let mut patch = String::new();
+
+    for line in response.lines() {
+        let trimmed = line.trim_start();
+        if let Some(info) = trimmed.strip_prefix("```") {
+            if in_fence {
+                if fence_is_diff {
+                    return patch.trim().to_string();
+                }
+                in_fence = false;
+                fence_is_diff = false;
+                continue;
+            }
+
+            in_fence = true;
+            fence_is_diff = matches!(info.trim(), "diff" | "patch");
+            continue;
+        }
+
+        if in_fence && fence_is_diff {
+            patch.push_str(line);
+            patch.push('\n');
+        }
+    }
+
+    response.trim().to_string()
+}
+
 fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
     if event != PromptEvent::Validate {
         return Ok(());
@@ -1049,6 +1223,11 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("fix") => fix_agent(cx),
         Some("refactor") => refactor_agent(cx),
         Some("edit") => edit_agent(cx),
+        Some("patch") => open_agent_patch(cx),
+        Some("apply") => {
+            apply_agent_patch(cx);
+            Ok(())
+        }
         Some("panel") => {
             open_agent_panel(cx);
             Ok(())

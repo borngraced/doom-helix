@@ -71,6 +71,14 @@ Starts the configured agent first if needed.
 Asks Codex to return a unified diff patch proposal for the current primary selection. This is read-only: Helix appends the patch proposal to the transcript and does not apply it.
 Starts the configured agent first if needed.
 
+`:agent patch`
+
+Opens the latest stored agent patch proposal in a diff scratch buffer.
+
+`:agent apply`
+
+Prompts for confirmation, then applies the latest stored agent patch with `git apply --whitespace=nowarn -`.
+
 `:agent panel`
 
 Opens or focuses the agent transcript buffer. The split direction follows `[editor.agent].panel-position`.
@@ -165,7 +173,9 @@ e = ":agent explain"
 f = ":agent fix"
 r = ":agent refactor"
 E = ":agent edit"
-p = ":agent panel"
+a = ":agent apply"
+p = ":agent patch"
+P = ":agent panel"
 s = ":agent start"
 x = ":agent clear"
 S = ":agent status"
@@ -178,7 +188,7 @@ r = ":agent refactor"
 E = ":agent edit"
 ```
 
-With this map, select code and press `<space>a e` to explain it, `<space>a f` to ask for a fix proposal, `<space>a r` to ask for a refactor proposal, or `<space>a E` to ask for a unified diff edit proposal.
+With this map, select code and press `<space>a e` to explain it, `<space>a f` to ask for a fix proposal, `<space>a r` to ask for a refactor proposal, or `<space>a E` to ask for a unified diff edit proposal. Use `<space>a p` to inspect the latest patch and `<space>a a` to apply it after confirmation.
 
 ## Near-Term Direction
 
