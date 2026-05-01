@@ -22,6 +22,31 @@ pub struct AgentServerConfig {
     pub args: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentLaunchConfig {
+    pub name: String,
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+impl AgentConfig {
+    pub fn launch_config(&self) -> anyhow::Result<AgentLaunchConfig> {
+        let server = self.servers.get(&self.default_agent).ok_or_else(|| {
+            anyhow::anyhow!("agent server '{}' is not configured", self.default_agent)
+        })?;
+
+        if server.command.trim().is_empty() {
+            anyhow::bail!("agent server '{}' has an empty command", self.default_agent);
+        }
+
+        Ok(AgentLaunchConfig {
+            name: self.default_agent.clone(),
+            command: server.command.clone(),
+            args: server.args.clone(),
+        })
+    }
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -70,5 +95,39 @@ mod tests {
         assert_eq!(config.default_agent, "local");
         assert_eq!(config.servers["local"].command, "agent");
         assert_eq!(config.servers["local"].args, ["--acp"]);
+    }
+
+    #[test]
+    fn resolves_launch_config() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            default-agent = "local"
+
+            [servers.local]
+            command = "agent"
+            args = ["--acp"]
+            "#,
+        )
+        .unwrap();
+
+        let launch = config.launch_config().unwrap();
+        assert_eq!(launch.name, "local");
+        assert_eq!(launch.command, "agent");
+        assert_eq!(launch.args, ["--acp"]);
+    }
+
+    #[test]
+    fn rejects_missing_default_agent() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            default-agent = "missing"
+
+            [servers.local]
+            command = "agent"
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.launch_config().is_err());
     }
 }
