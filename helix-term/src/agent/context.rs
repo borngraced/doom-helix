@@ -281,6 +281,38 @@ pub fn prompt_with_primary_selection(editor: &Editor, prompt: &str) -> String {
     prompt_with_primary_selection_snapshot(&snapshot, prompt)
 }
 
+pub fn prompt_with_editor_context_snapshot(snapshot: &EditorSnapshot, prompt: &str) -> String {
+    let prompt = prompt_with_context_summary_snapshot(snapshot, prompt);
+    prompt_with_primary_selection_snapshot(snapshot, &prompt)
+}
+
+fn prompt_with_context_summary_snapshot(snapshot: &EditorSnapshot, prompt: &str) -> String {
+    let active_path = snapshot
+        .active_file
+        .path
+        .as_deref()
+        .unwrap_or(snapshot.active_file.display_name.as_str());
+    let language = snapshot
+        .active_file
+        .language_id
+        .as_deref()
+        .or(snapshot.active_file.language.as_deref())
+        .unwrap_or("unknown");
+    let selection_count = snapshot
+        .selections
+        .iter()
+        .filter(|selection| !selection.empty && !selection.text.trim().is_empty())
+        .count();
+    let diagnostics = snapshot.diagnostics.len();
+
+    format!(
+        "{prompt}\n\nEditor context:\n- Workspace root: {}\n- Active file: {active_path}\n- Language: {language}\n- Cursor: {}:{}\n- Non-empty selections: {selection_count}\n- Diagnostics in active file: {diagnostics}",
+        snapshot.workspace_root,
+        snapshot.cursor.line + 1,
+        snapshot.cursor.column + 1,
+    )
+}
+
 pub fn prompt_with_primary_selection_snapshot(snapshot: &EditorSnapshot, prompt: &str) -> String {
     let Some(selection) = snapshot.selections.iter().find(|selection| {
         selection.primary && !selection.empty && !selection.text.trim().is_empty()
@@ -460,5 +492,27 @@ mod tests {
         let prompt = prompt_with_primary_selection_snapshot(&snapshot, "Explain this.");
         assert!(prompt.contains("Selected text from /repo/main.go:1:1-1:15"));
         assert!(prompt.contains("```go\nfmt.Println(x)\n```"));
+    }
+
+    #[test]
+    fn prompt_includes_active_file_context_without_selection() {
+        let snapshot = snapshot_with_selection(selection_snapshot(true, ""));
+        let prompt = prompt_with_editor_context_snapshot(&snapshot, "Review this file.");
+
+        assert!(prompt.contains("Editor context:"));
+        assert!(prompt.contains("- Workspace root: /repo"));
+        assert!(prompt.contains("- Active file: /repo/main.go"));
+        assert!(prompt.contains("- Language: go"));
+        assert!(prompt.contains("- Cursor: 1:1"));
+    }
+
+    #[test]
+    fn prompt_includes_context_and_extended_selection() {
+        let snapshot = snapshot_with_selection(selection_snapshot(false, "fmt.Println(x)"));
+        let prompt = prompt_with_editor_context_snapshot(&snapshot, "Explain this.");
+
+        assert!(prompt.contains("- Active file: /repo/main.go"));
+        assert!(prompt.contains("- Non-empty selections: 1"));
+        assert!(prompt.contains("Selected text from /repo/main.go:1:1-1:15"));
     }
 }

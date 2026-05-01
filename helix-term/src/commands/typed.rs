@@ -1256,7 +1256,7 @@ fn prompt_agent_turn(
     let transcript_prompt = visible_agent_prompt(kind, prompt.trim());
     let prompt =
         agent_prompt_with_formatting(kind, &prompt, snapshot.active_file.language_id.as_deref());
-    let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
+    let prompt = crate::agent::context::prompt_with_editor_context_snapshot(&snapshot, &prompt);
     let patch_cwd = snapshot.workspace_root.clone();
     let patch_source_path = snapshot.active_file.path.clone();
     let cancel_generation = crate::agent::runtime::cancel_generation();
