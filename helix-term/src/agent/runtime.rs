@@ -367,17 +367,8 @@ pub fn render_transcript() -> String {
             rendered.push_str("\n\n---\n\n");
         }
 
-        rendered.push_str(&format!(
-            "**You [{} #{}]:**\n\n{}\n\n",
-            turn.kind.label(),
-            turn.id,
-            turn.prompt.trim()
-        ));
-        rendered.push_str(&format!(
-            "**Codex [{} #{}]:**\n\n",
-            turn.kind.label(),
-            turn.id
-        ));
+        rendered.push_str(&format!("**You:**\n\n{}\n\n", turn.prompt.trim()));
+        rendered.push_str("**Codex:**\n\n");
         match turn.status {
             AgentTranscriptStatus::Pending => {
                 if let Some(response) = turn

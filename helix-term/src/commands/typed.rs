@@ -816,11 +816,11 @@ fn goto_agent_turn(cx: &mut compositor::Context, next: bool) {
         .cursor(doc.text().slice(..));
     let cursor_byte = doc.text().char_to_byte(cursor);
     let target_byte = if next {
-        text.match_indices("**You [")
+        text.match_indices("**You:**")
             .map(|(index, _)| index)
             .find(|index| *index > cursor_byte)
     } else {
-        text[..cursor_byte].rfind("**You [")
+        text[..cursor_byte].rfind("**You:**")
     };
 
     let Some(target_byte) = target_byte else {
