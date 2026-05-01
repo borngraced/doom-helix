@@ -1418,12 +1418,15 @@ fn render_agent_transcript_editor(
     let loader = editor.syn_loader.load();
     let contents = crate::agent::runtime::render_transcript();
     let doc = doc_mut!(editor, &doc_id);
+    doc.readonly = false;
     let transaction = Transaction::change(
         doc.text(),
         [(0, doc.text().len_chars(), Some(contents.into()))].into_iter(),
     );
     doc.apply(&transaction, view_id);
     doc.set_language_by_language_id("markdown", &loader).ok();
+    doc.reset_modified();
+    doc.readonly = true;
 }
 
 fn agent_transcript_doc_id(editor: &mut Editor, action: Action) -> (helix_view::DocumentId, bool) {
@@ -1434,7 +1437,7 @@ fn agent_transcript_doc_id(editor: &mut Editor, action: Action) -> (helix_view::
     }
 
     let doc_id = editor.new_file(action);
-    doc_mut!(editor, &doc_id).set_display_name("[agent]");
+    mark_agent_document(doc_mut!(editor, &doc_id), "[agent]");
     crate::agent::runtime::set_transcript_doc_id(doc_id);
     (doc_id, true)
 }
@@ -1527,7 +1530,7 @@ fn open_agent_named_scratch_editor(
 
     let doc_id = editor.new_file(Action::HorizontalSplit);
     let view_id = view!(editor).id;
-    doc_mut!(editor, &doc_id).set_display_name(display_name);
+    mark_agent_document(doc_mut!(editor, &doc_id), display_name);
     replace_agent_scratch_contents(editor, doc_id, view_id, contents, language_id);
 
     Ok(())
@@ -1542,6 +1545,7 @@ fn replace_agent_scratch_contents(
 ) {
     let loader = editor.syn_loader.load();
     let doc = doc_mut!(editor, &doc_id);
+    doc.readonly = false;
     doc.ensure_view_init(view_id);
     let delete = Transaction::delete(doc.text(), [(0, doc.text().len_chars())].into_iter());
     doc.apply(&delete, view_id);
@@ -1550,6 +1554,8 @@ fn replace_agent_scratch_contents(
     doc.apply(&transaction, view_id);
     doc.set_selection(view_id, Selection::point(0));
     doc.set_language_by_language_id(language_id, &loader).ok();
+    doc.reset_modified();
+    doc.readonly = true;
 }
 
 fn agent_named_scratch_doc_id(
@@ -1560,6 +1566,12 @@ fn agent_named_scratch_doc_id(
         .documents()
         .find(|doc| doc.path().is_none() && doc.display_name() == display_name)
         .map(|doc| doc.id())
+}
+
+fn mark_agent_document(doc: &mut helix_view::Document, display_name: &str) {
+    doc.set_display_name(display_name);
+    doc.reset_modified();
+    doc.readonly = true;
 }
 
 fn agent_turn_response_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyhow::Result<String> {
