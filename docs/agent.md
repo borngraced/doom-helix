@@ -59,8 +59,7 @@ The snapshot currently includes:
 
 The next implementation steps are:
 
-1. Add an agent session model.
-2. Spawn an external ACP-compatible subprocess.
-3. Send the dry-run request payload over the transport.
-4. Render responses in an agent buffer.
-5. Add explicit permission gates before any write, shell, or command-execution tool.
+1. Spawn an external ACP-compatible subprocess.
+2. Send `initialize`, `initialized`, and `session/new` JSON-RPC messages over stdio.
+3. Render responses in an agent buffer.
+4. Add explicit permission gates before any write, shell, or command-execution tool.
