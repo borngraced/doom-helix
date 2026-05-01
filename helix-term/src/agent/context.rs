@@ -113,6 +113,7 @@ pub struct FileChangeSnapshot {
 }
 
 pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
+    let agent_config = editor.config().agent.clone();
     let (view, doc) = current_ref!(editor);
     let transcript_doc_id = super::runtime::transcript_doc_id();
     let doc = if doc.path().is_none() && Some(doc.id()) == transcript_doc_id {
@@ -127,6 +128,7 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
     };
     let text = doc.text().slice(..);
     let selection = doc.selection(snapshot_view_id);
+    let selection_mode = matches!(editor.mode(), helix_view::document::Mode::Select);
     let primary = selection.primary();
     let cursor = coords_at_pos(text, primary.head);
     let cwd = helix_stdx::env::current_working_dir();
@@ -145,7 +147,7 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         .map(|(index, range)| {
             let start = coords_at_pos(text, range.from());
             let end = coords_at_pos(text, range.to());
-            let empty = range.is_empty() || range.len() <= 1;
+            let empty = range.is_empty() || (range.len() <= 1 && !selection_mode);
             let selected_text = if empty {
                 String::new()
             } else {
@@ -175,41 +177,56 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         })
         .collect();
 
-    let open_buffers = editor
-        .documents()
-        .map(|doc| BufferSnapshot {
-            id: doc.id().to_string(),
-            display_name: doc.display_name().to_string(),
-            path: doc.path().map(|path| path.display().to_string()),
-            language: doc.language_name().map(ToOwned::to_owned),
-            modified: doc.is_modified(),
-            diagnostics: doc.diagnostics().len(),
-            agent_transcript: Some(doc.id()) == transcript_doc_id,
-        })
-        .collect();
+    let open_buffers = if agent_config.include_visible_buffer {
+        editor
+            .documents()
+            .map(|doc| BufferSnapshot {
+                id: doc.id().to_string(),
+                display_name: doc.display_name().to_string(),
+                path: doc.path().map(|path| path.display().to_string()),
+                language: doc.language_name().map(ToOwned::to_owned),
+                modified: doc.is_modified(),
+                diagnostics: if agent_config.include_diagnostics {
+                    doc.diagnostics().len()
+                } else {
+                    0
+                },
+                agent_transcript: Some(doc.id()) == transcript_doc_id,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
-    let diagnostics = doc
-        .diagnostics()
-        .iter()
-        .take(50)
-        .map(|diagnostic| DiagnosticSnapshot {
-            line: diagnostic.line,
-            severity: diagnostic.severity.map(|severity| format!("{severity:?}")),
-            source: diagnostic.source.clone(),
-            message: diagnostic.message.clone(),
-        })
-        .collect();
+    let diagnostics = if agent_config.include_diagnostics {
+        doc.diagnostics()
+            .iter()
+            .take(50)
+            .map(|diagnostic| DiagnosticSnapshot {
+                line: diagnostic.line,
+                severity: diagnostic.severity.map(|severity| format!("{severity:?}")),
+                source: diagnostic.source.clone(),
+                message: diagnostic.message.clone(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
-    let recent_commands = editor
-        .registers
-        .read(':', editor)
-        .map(|commands| {
-            commands
-                .take(MAX_RECENT_COMMANDS)
-                .map(|command| format!(":{command}"))
-                .collect()
-        })
-        .unwrap_or_default();
+    let recent_commands = if agent_config.include_command_history {
+        editor
+            .registers
+            .read(':', editor)
+            .map(|commands| {
+                commands
+                    .take(MAX_RECENT_COMMANDS)
+                    .map(|command| format!(":{command}"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     let lsp_servers = doc
         .language_servers()
@@ -221,7 +238,11 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
     EditorSnapshot {
         workspace_root: workspace_root.display().to_string(),
         cwd: cwd.display().to_string(),
-        theme: editor.theme.name().to_string(),
+        theme: if agent_config.include_theme {
+            editor.theme.name().to_string()
+        } else {
+            String::new()
+        },
         mode: format!("{:?}", editor.mode()).to_lowercase(),
         active_file: ActiveFileSnapshot {
             id: doc.id().to_string(),
@@ -238,11 +259,15 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
             column: cursor.col,
             char: primary.head,
         },
-        visible_ranges: vec![VisibleRangeSnapshot {
-            file: doc.display_name().to_string(),
-            start_line: visible_start,
-            end_line: visible_end,
-        }],
+        visible_ranges: if agent_config.include_visible_buffer {
+            vec![VisibleRangeSnapshot {
+                file: doc.display_name().to_string(),
+                start_line: visible_start,
+                end_line: visible_end,
+            }]
+        } else {
+            Vec::new()
+        },
         selections,
         open_buffers,
         diagnostics,

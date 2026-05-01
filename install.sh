@@ -15,7 +15,7 @@ agent_choice=${DOOMHELIX_AGENT:-}
 noninteractive=${DOOMHELIX_NONINTERACTIVE:-0}
 install_codex_acp=${DOOMHELIX_INSTALL_CODEX_ACP:-}
 codex_acp_version=${CODEX_ACP_VERSION:-0.12.0}
-claude_acp_package=${CLAUDE_ACP_PACKAGE:-@zed-industries/claude-code-acp}
+claude_acp_package=${CLAUDE_ACP_PACKAGE:-@zed-industries/claude-code-acp@0.16.2}
 claude_acp_command=${CLAUDE_ACP_COMMAND:-claude-code-acp}
 
 need() {
@@ -127,6 +127,10 @@ download() {
   fi
 }
 
+sh_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 platform_info() {
   arch=$(uname -m)
   os=$(uname -s)
@@ -175,17 +179,29 @@ doomhelix_target() {
 
 install_prebuilt_doomhelix() {
   target=$(doomhelix_target)
-  tag=${DOOMHELIX_RELEASE_TAG:-}
-  if [ -z "$tag" ]; then
-    tag=$repo_ref
-  fi
+  tag=${DOOMHELIX_RELEASE_TAG:-latest}
 
-  version=${tag#v}
-  asset="doom-helix-${version}-${target}.tar.gz"
   if [ "$tag" = latest ]; then
-    url="https://github.com/${release_repo}/releases/latest/download/${asset}"
+    asset="doom-helix-*-${target}.tar.gz"
+    api_url="https://api.github.com/repos/${release_repo}/releases/latest"
+    tmp_meta=$(mktemp "${TMPDIR:-/tmp}/doomhelix-release.XXXXXX.json")
+    if ! download "$api_url" "$tmp_meta"; then
+      rm -f "$tmp_meta"
+      return 1
+    fi
+    url=$(sed -n "s/.*\"browser_download_url\": *\"\([^\"]*doom-helix-[^\"]*-${target}\\.tar\\.gz\)\".*/\1/p" "$tmp_meta" | head -n 1)
+    if [ -z "$url" ]; then
+      rm -f "$tmp_meta"
+      return 1
+    fi
+    asset=${url##*/}
+    checksum_url=$(sed -n "s/.*\"browser_download_url\": *\"\([^\"]*${asset}\\.sha256\)\".*/\1/p" "$tmp_meta" | head -n 1)
+    rm -f "$tmp_meta"
   else
+    version=${tag#v}
+    asset="doom-helix-${version}-${target}.tar.gz"
     url="https://github.com/${release_repo}/releases/download/${tag}/${asset}"
+    checksum_url="https://github.com/${release_repo}/releases/download/${tag}/${asset}.sha256"
   fi
   tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/doomhelix-release.XXXXXX")
 
@@ -193,6 +209,13 @@ install_prebuilt_doomhelix() {
   if ! download "$url" "$tmp_dir/$asset"; then
     rm -rf "$tmp_dir"
     return 1
+  fi
+  if [ -n "${checksum_url:-}" ] && command -v sha256sum >/dev/null 2>&1; then
+    if download "$checksum_url" "$tmp_dir/$asset.sha256"; then
+      (cd "$tmp_dir" && sha256sum -c "$asset.sha256")
+    else
+      echo "warning: release checksum unavailable; continuing without archive verification." >&2
+    fi
   fi
 
   tar -xzf "$tmp_dir/$asset" -C "$tmp_dir"
@@ -332,7 +355,6 @@ write_default_config() {
     printf '%s\n' 'include-command-history = true'
     printf '%s\n' 'include-visible-buffer = true'
     printf '%s\n' 'include-diagnostics = true'
-    printf '%s\n' 'require-approval-for-shell = true'
 
     printf '%s\n' ''
     printf '%s\n' '[keys.normal.space.a]'
@@ -412,7 +434,7 @@ install_claude_acp
 write_default_config
 {
   printf '%s\n' '#!/bin/sh'
-  printf 'HELIX_RUNTIME=%s exec %s/dhx-bin "$@"\n' "$runtime_dir" "$bin_dir"
+  printf 'HELIX_RUNTIME=%s exec %s "$@"\n' "$(sh_quote "$runtime_dir")" "$(sh_quote "$bin_dir/dhx-bin")"
 } >"$bin_dir/dhx"
 chmod 755 "$bin_dir/dhx"
 

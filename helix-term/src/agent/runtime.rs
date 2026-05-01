@@ -48,6 +48,10 @@ pub async fn start(
     launch_config: AgentLaunchConfig,
     handshake: Vec<JsonRpcRequest>,
 ) -> anyhow::Result<()> {
+    if let Some(status) = AGENT_BUSY.lock().expect("agent busy lock poisoned").clone() {
+        anyhow::bail!("agent '{}' is busy", status.name);
+    }
+
     let _busy_guard = set_busy_agent(AgentBusyStatus {
         name: launch_config.name.clone(),
         session_id: None,
@@ -93,6 +97,9 @@ pub async fn ensure_started(
     {
         return Ok(false);
     }
+    if let Some(status) = AGENT_BUSY.lock().expect("agent busy lock poisoned").clone() {
+        anyhow::bail!("agent '{}' is busy", status.name);
+    }
 
     start(launch_config, handshake).await?;
     Ok(true)
@@ -100,6 +107,10 @@ pub async fn ensure_started(
 
 pub async fn stop() -> anyhow::Result<Option<String>> {
     let Some(mut running) = take_running_agent() else {
+        if let Some(status) = AGENT_BUSY.lock().expect("agent busy lock poisoned").clone() {
+            cancel_all();
+            return Ok(Some(status.name));
+        }
         return Ok(None);
     };
 
@@ -135,6 +146,7 @@ where
     let Some(mut running) = take_running_agent() else {
         anyhow::bail!("no agent is running");
     };
+    let generation = cancel_generation();
     let _busy_guard = set_busy_agent(AgentBusyStatus {
         name: running.name.clone(),
         session_id: running.session_id.clone(),
@@ -144,6 +156,7 @@ where
     let mut messages = Vec::new();
     let mut session_response = None;
     while running.session_id.is_none() {
+        abort_cancelled_turn(&mut running, generation).await?;
         let message = recv_running_message(&mut running).await?;
         log_agent_message("startup", &message);
         update_session_id(&mut running, &message);
@@ -175,9 +188,11 @@ where
         );
         running.process.send(&request).await?;
         loop {
+            abort_cancelled_turn(&mut running, generation).await?;
             let message = recv_running_message(&mut running).await?;
             log_agent_message("approval-mode", &message);
             if let Some(response) = handle_agent_request(&message).await? {
+                abort_cancelled_turn(&mut running, generation).await?;
                 log_agent_response("approval-mode", &response);
                 running.process.send(&response).await?;
                 continue;
@@ -204,9 +219,11 @@ where
     running.process.send(&request).await?;
 
     loop {
+        abort_cancelled_turn(&mut running, generation).await?;
         let message = recv_running_message(&mut running).await?;
         log_agent_message("prompt", &message);
         if let Some(response) = handle_agent_request(&message).await? {
+            abort_cancelled_turn(&mut running, generation).await?;
             log_agent_response("prompt", &response);
             running.process.send(&response).await?;
             continue;
@@ -324,7 +341,7 @@ async fn prompt_acp_permission(params: Option<Value>) -> anyhow::Result<String> 
         })
         .unwrap_or("Approve agent tool call?");
     let body = acp_permission_body(&params);
-    let (allow_option, reject_option) = acp_permission_choices(&params);
+    let (allow_option, reject_option) = acp_permission_choices(&params)?;
     let accepted = prompt_yes_no(title, body).await?;
     Ok(if accepted {
         allow_option
@@ -333,19 +350,18 @@ async fn prompt_acp_permission(params: Option<Value>) -> anyhow::Result<String> 
     })
 }
 
-fn acp_permission_choices(params: &Value) -> (String, String) {
+fn acp_permission_choices(params: &Value) -> anyhow::Result<(String, String)> {
     let options = params
         .get("options")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
     let allow_option = acp_permission_option(&options, true)
-        .or_else(|| options.first().and_then(acp_permission_option_id))
-        .unwrap_or_else(|| "allow".to_string());
-    let reject_option =
-        acp_permission_option(&options, false).unwrap_or_else(|| "deny".to_string());
+        .ok_or_else(|| anyhow::anyhow!("permission request did not include an allow option"))?;
+    let reject_option = acp_permission_option(&options, false)
+        .ok_or_else(|| anyhow::anyhow!("permission request did not include a reject option"))?;
 
-    (allow_option, reject_option)
+    Ok((allow_option, reject_option))
 }
 
 fn permission_title(params: Option<&Value>) -> Option<&str> {
@@ -502,6 +518,15 @@ async fn prompt_yes_no(title: &str, body: String) -> anyhow::Result<bool> {
     Ok(rx.await.unwrap_or(false))
 }
 
+async fn abort_cancelled_turn(running: &mut RunningAgent, generation: u64) -> anyhow::Result<()> {
+    if is_cancelled(generation) {
+        let _ = running.process.kill().await;
+        anyhow::bail!("agent turn cancelled");
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct AgentTurn {
     pub request_id: u64,
@@ -608,6 +633,7 @@ pub struct AgentPatchProposal {
 #[derive(Clone, Debug)]
 pub struct AgentTranscriptTurn {
     pub id: u64,
+    pub agent_label: String,
     pub kind: AgentTranscriptKind,
     pub prompt: String,
     pub response: Option<String>,
@@ -644,12 +670,18 @@ pub enum AgentTranscriptStatus {
     Failed,
 }
 
-pub fn append_transcript_turn(id: u64, kind: AgentTranscriptKind, prompt: String) {
+pub fn append_transcript_turn(
+    id: u64,
+    agent_label: String,
+    kind: AgentTranscriptKind,
+    prompt: String,
+) {
     AGENT_TRANSCRIPT_TURNS
         .lock()
         .expect("agent transcript turns lock poisoned")
         .push(AgentTranscriptTurn {
             id,
+            agent_label,
             kind,
             prompt,
             response: None,
@@ -713,7 +745,6 @@ pub fn clear_transcript_turns() {
 }
 
 pub fn render_transcript() -> String {
-    let agent_label = transcript_agent_label();
     let turns = AGENT_TRANSCRIPT_TURNS
         .lock()
         .expect("agent transcript turns lock poisoned");
@@ -724,7 +755,7 @@ pub fn render_transcript() -> String {
         }
 
         rendered.push_str(&format!("**You:**\n\n{}\n\n", turn.prompt.trim()));
-        rendered.push_str(&format!("**{agent_label}:**\n\n"));
+        rendered.push_str(&format!("**{}:**\n\n", turn.agent_label));
         match turn.status {
             AgentTranscriptStatus::Pending => {
                 let status_message = turn.status_message.as_deref().unwrap_or("Working...");
@@ -753,14 +784,6 @@ fn set_transcript_agent_label(label: String) {
     *AGENT_TRANSCRIPT_LABEL
         .lock()
         .expect("agent transcript label lock poisoned") = Some(label);
-}
-
-fn transcript_agent_label() -> String {
-    AGENT_TRANSCRIPT_LABEL
-        .lock()
-        .expect("agent transcript label lock poisoned")
-        .clone()
-        .unwrap_or_else(|| "Agent".to_string())
 }
 
 fn update_transcript_turn(id: u64, status: AgentTranscriptStatus, response: Option<String>) {
@@ -1175,16 +1198,13 @@ mod tests {
         });
 
         assert_eq!(
-            acp_permission_choices(&params),
+            acp_permission_choices(&params).unwrap(),
             ("approved".to_string(), "denied".to_string())
         );
     }
 
     #[test]
-    fn acp_permission_options_have_stable_fallbacks() {
-        assert_eq!(
-            acp_permission_choices(&json!({})),
-            ("allow".to_string(), "deny".to_string())
-        );
+    fn acp_permission_options_fail_closed_without_choices() {
+        assert!(acp_permission_choices(&json!({})).is_err());
     }
 }

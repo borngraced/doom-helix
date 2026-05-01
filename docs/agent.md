@@ -191,6 +191,10 @@ include:
 - Git branch and changed files
 - recent `:` commands
 
+The `include-theme`, `include-command-history`, `include-visible-buffer`, and
+`include-diagnostics` toggles remove those fields from the embedded context
+when set to `false`.
+
 When the agent panel is focused, DoomHelix uses the last active real file from
 that panel's view history as the coding context. This makes prompts like
 `review this file` work naturally after interacting with the transcript.
@@ -229,7 +233,6 @@ include-theme = true
 include-command-history = true
 include-visible-buffer = true
 include-diagnostics = true
-require-approval-for-shell = true
 ```
 
 Minimal Claude config:
@@ -272,6 +275,8 @@ args = ["--websocket", "127.0.0.1:9000"]
 For WebSocket servers, DoomHelix starts `command` when provided, then connects
 to `url`. `transport` is inferred: `command` alone uses stdio, and `url` uses
 WebSocket. Each WebSocket text or binary frame carries one ACP JSON-RPC message.
+Insecure `ws://` URLs are limited to localhost; use `wss://` for remote ACP
+servers.
 
 ## Suggested Keymap
 
@@ -321,10 +326,10 @@ custom ACP / configure later.
 For non-interactive installs, set `DOOMHELIX_AGENT`:
 
 ```sh
-DOOMHELIX_AGENT=codex curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
-DOOMHELIX_AGENT=claude curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
-DOOMHELIX_AGENT=both curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
-DOOMHELIX_AGENT=none curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | DOOMHELIX_AGENT=codex sh
+curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | DOOMHELIX_AGENT=claude sh
+curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | DOOMHELIX_AGENT=both sh
+curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | DOOMHELIX_AGENT=none sh
 ```
 
 Codex installs `codex-acp`. Claude installs

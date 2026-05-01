@@ -10,6 +10,9 @@ on:
     paths:
     - '.github/workflows/release.yml'
 
+permissions:
+  contents: read
+
 env:
   # Preview mode: Publishes the build output as a CI artifact instead of creating
   # a release, allowing for manual inspection of the output. This mode is

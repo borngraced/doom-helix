@@ -3,10 +3,14 @@ on:
   pull_request:
   push:
     branches:
-      - master
+      - main
+      - agentic-acp-integration
   merge_group:
   schedule:
     - cron: "00 01 * * *"
+
+permissions:
+  contents: read
 
 env:
   MSRV: "1.90"

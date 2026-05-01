@@ -807,12 +807,11 @@ fn goto_agent_turn(cx: &mut compositor::Context, next: bool) {
         .primary()
         .cursor(doc.text().slice(..));
     let cursor_byte = doc.text().char_to_byte(cursor);
+    let markers = agent_turn_marker_indices(&text);
     let target_byte = if next {
-        text.match_indices("**You:**")
-            .map(|(index, _)| index)
-            .find(|index| *index > cursor_byte)
+        markers.into_iter().find(|index| *index > cursor_byte)
     } else {
-        text[..cursor_byte].rfind("**You:**")
+        markers.into_iter().rev().find(|index| *index < cursor_byte)
     };
 
     let Some(target_byte) = target_byte else {
@@ -824,6 +823,25 @@ fn goto_agent_turn(cx: &mut compositor::Context, next: bool) {
     doc.set_selection(view_id, Selection::point(target));
     let view = view_mut!(cx.editor, view_id);
     view.ensure_cursor_in_view(doc, scrolloff);
+}
+
+fn agent_turn_marker_indices(text: &str) -> Vec<usize> {
+    let mut indices = Vec::new();
+    let mut byte_offset = 0;
+
+    for line in text.split_inclusive('\n') {
+        let marker = line.trim_end_matches(['\r', '\n']);
+        if marker == "**You:**" {
+            indices.push(byte_offset);
+        }
+        byte_offset += line.len();
+    }
+
+    if !text.ends_with('\n') && text[byte_offset..].trim_end_matches('\r') == "**You:**" {
+        indices.push(byte_offset);
+    }
+
+    indices
 }
 
 fn open_agent_patch(cx: &mut compositor::Context) -> anyhow::Result<()> {
@@ -1371,7 +1389,7 @@ fn prompt_agent_turn(
     }
     cx.editor.set_status("Agent is thinking...");
     let pending_range =
-        append_agent_pending_transcript_editor(cx.editor, kind, &transcript_prompt)?;
+        append_agent_pending_transcript_editor(cx.editor, kind, &agent_name, &transcript_prompt)?;
 
     cx.jobs.callback(async move {
         let result = async {
@@ -1553,6 +1571,7 @@ struct AgentPendingTurn {
 fn append_agent_pending_transcript_editor(
     editor: &mut Editor,
     kind: crate::agent::runtime::AgentTranscriptKind,
+    agent_label: &str,
     prompt: &str,
 ) -> anyhow::Result<AgentPendingTurn> {
     let position = agent_panel_position(editor);
@@ -1564,7 +1583,12 @@ fn append_agent_pending_transcript_editor(
     }
     resize_agent_panel(editor, view_id);
     let pending_id = AGENT_PENDING_TURN_ID.fetch_add(1, Ordering::Relaxed);
-    crate::agent::runtime::append_transcript_turn(pending_id, kind, prompt.trim().to_string());
+    crate::agent::runtime::append_transcript_turn(
+        pending_id,
+        agent_label.to_string(),
+        kind,
+        prompt.trim().to_string(),
+    );
     render_agent_transcript_editor(editor, doc_id, view_id);
     move_agent_transcript_cursor_to_end(editor, doc_id, view_id);
 
@@ -1583,17 +1607,19 @@ fn replace_agent_pending_transcript_editor(
         return Ok(());
     }
 
-    let position = agent_panel_position(editor);
-    let action = agent_panel_action(position);
-    let view_id = prepare_agent_transcript_doc(editor, pending_turn.doc_id, action);
+    let view_id = agent_transcript_view_id(editor, pending_turn.doc_id).unwrap_or_else(|| {
+        let position = agent_panel_position(editor);
+        let action = agent_panel_action(position);
+        prepare_agent_transcript_doc(editor, pending_turn.doc_id, action)
+    });
     resize_agent_panel(editor, view_id);
     crate::agent::runtime::complete_transcript_turn(pending_turn.id, contents.trim().to_string());
     render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
+    let scrolloff = editor.config().scrolloff;
     let doc = doc_mut!(editor, &pending_turn.doc_id);
     let cursor = doc.text().len_chars();
     doc.set_selection(view_id, Selection::point(cursor));
-    let scrolloff = editor.config().scrolloff;
-    let (view, doc) = current!(editor);
+    let view = view_mut!(editor, view_id);
     view.ensure_cursor_in_view(doc, scrolloff);
 
     Ok(())
@@ -1652,17 +1678,19 @@ fn fail_agent_pending_transcript_editor(
         return Ok(());
     }
 
-    let position = agent_panel_position(editor);
-    let action = agent_panel_action(position);
-    let view_id = prepare_agent_transcript_doc(editor, pending_turn.doc_id, action);
+    let view_id = agent_transcript_view_id(editor, pending_turn.doc_id).unwrap_or_else(|| {
+        let position = agent_panel_position(editor);
+        let action = agent_panel_action(position);
+        prepare_agent_transcript_doc(editor, pending_turn.doc_id, action)
+    });
     resize_agent_panel(editor, view_id);
     crate::agent::runtime::fail_transcript_turn(pending_turn.id, contents);
     render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
+    let scrolloff = editor.config().scrolloff;
     let doc = doc_mut!(editor, &pending_turn.doc_id);
     let cursor = doc.text().len_chars();
     doc.set_selection(view_id, Selection::point(cursor));
-    let scrolloff = editor.config().scrolloff;
-    let (view, doc) = current!(editor);
+    let view = view_mut!(editor, view_id);
     view.ensure_cursor_in_view(doc, scrolloff);
 
     Ok(())

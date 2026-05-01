@@ -569,11 +569,41 @@ impl AgentConfig {
             AgentTransport::Websocket if url.trim().is_empty() => {
                 anyhow::bail!("agent '{name}' has an empty url");
             }
+            AgentTransport::Websocket if !agent_websocket_url_allowed(url) => {
+                anyhow::bail!(
+                    "agent '{name}' uses a non-local insecure websocket url; use wss:// or localhost"
+                );
+            }
             _ => {}
         }
 
         Ok(())
     }
+}
+
+fn agent_websocket_url_allowed(url: &str) -> bool {
+    let url = url.trim();
+    if url.starts_with("wss://") {
+        return true;
+    }
+
+    let Some(rest) = url.strip_prefix("ws://") else {
+        return true;
+    };
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(rest)
+        .rsplit_once('@')
+        .map_or(rest, |(_, host)| host)
+        .trim();
+    let host = if let Some(bracketed) = authority.strip_prefix('[') {
+        bracketed.split(']').next().unwrap_or("")
+    } else {
+        authority.split(':').next().unwrap_or("")
+    };
+
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
 impl Default for AgentConfig {
@@ -598,8 +628,8 @@ impl Default for AgentConfig {
                 "codex".to_string(),
                 AgentServerConfig {
                     transport: AgentTransport::Stdio,
-                    command: "codex".to_string(),
-                    args: vec!["acp".to_string()],
+                    command: "codex-acp".to_string(),
+                    args: Vec::new(),
                     url: String::new(),
                 },
             )]),
@@ -2857,5 +2887,34 @@ mod agent_config_tests {
         .unwrap();
 
         assert!(config.launch_config().is_err());
+    }
+
+    #[test]
+    fn rejects_non_local_insecure_websocket_agent() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            enable = true
+            name = "remote"
+            url = "ws://example.com/acp"
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.launch_config().is_err());
+    }
+
+    #[test]
+    fn allows_secure_remote_websocket_agent() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            enable = true
+            name = "remote"
+            url = "wss://example.com/acp"
+            "#,
+        )
+        .unwrap();
+
+        let launch = config.launch_config().unwrap();
+        assert_eq!(launch.transport, AgentTransport::Websocket);
     }
 }

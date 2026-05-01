@@ -80,7 +80,7 @@ back to building from source. It prompts for an agent backend:
 For non-interactive installs, set `DOOMHELIX_AGENT`:
 
 ```sh
-DOOMHELIX_AGENT=claude curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | DOOMHELIX_AGENT=claude sh
 ```
 
 Supported values are `codex`, `claude`, `both`, and `none`. Use `none` when
