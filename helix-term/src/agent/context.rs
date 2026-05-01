@@ -17,6 +17,7 @@ pub struct EditorSnapshot {
     pub selections: Vec<SelectionSnapshot>,
     pub open_buffers: Vec<BufferSnapshot>,
     pub diagnostics: Vec<DiagnosticSnapshot>,
+    pub lsp_servers: Vec<String>,
     pub recent_commands: Vec<String>,
 }
 
@@ -164,6 +165,11 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         })
         .unwrap_or_default();
 
+    let lsp_servers = doc
+        .language_servers()
+        .map(|server| server.name().to_string())
+        .collect();
+
     EditorSnapshot {
         workspace_root: workspace_root.display().to_string(),
         cwd: cwd.display().to_string(),
@@ -192,6 +198,7 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         selections,
         open_buffers,
         diagnostics,
+        lsp_servers,
         recent_commands,
     }
 }
