@@ -67,27 +67,43 @@ curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.
 ```
 
 The installer downloads a prebuilt DoomHelix release when available and falls
-back to building from source. It installs:
+back to building from source. It prompts for an agent backend:
+
+- Codex
+- Claude
+- Both
+- Custom ACP / configure later
+
+For non-interactive installs, set `DOOMHELIX_AGENT`:
+
+```sh
+DOOMHELIX_AGENT=claude curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
+```
+
+Supported values are `codex`, `claude`, `both`, and `none`. Use `none` when
+you want to configure a custom ACP-compatible agent manually.
+
+The installer places:
 
 - `dhx` to `~/.local/bin/dhx`
 - `dhx-bin` to `~/.local/bin/dhx-bin`
-- `codex-acp` to `~/.local/bin/codex-acp`
+- selected ACP adapter binaries when requested
 - runtime files to `~/.local/share/doomhelix/runtime`
-- config is read from `~/.config/doomhelix/config.toml`
+- starter config at `~/.config/doomhelix/config.toml` if one does not already exist
 
 Override paths with `DOOMHELIX_PREFIX`, `DOOMHELIX_BIN_DIR`, or
 `DOOMHELIX_RUNTIME_DIR`.
 
-Force a local source build with:
+Force a local source build:
 
 ```sh
 DOOMHELIX_BUILD_FROM_SOURCE=1 sh install.sh
 ```
 
-Skip installing `codex-acp` with:
+Install only the editor:
 
 ```sh
-DOOMHELIX_INSTALL_CODEX_ACP=0 sh install.sh
+DOOMHELIX_AGENT=none sh install.sh
 ```
 
 ## Minimal Config
@@ -108,8 +124,10 @@ args = []
 ## Agent Backend
 
 DoomHelix talks to agents over ACP, the Agent Client Protocol used by Zed's
-agent integration. The default Codex setup uses Zed's `codex-acp` adapter, which
-bridges DoomHelix's ACP client to Codex's long-lived app-server backend.
+agent integration. Codex uses Zed's `codex-acp` adapter, which bridges
+DoomHelix's ACP client to Codex's long-lived app-server backend. Claude uses
+Zed's `@zed-industries/claude-code-acp` adapter, installed as
+`claude-code-acp`.
 
 ## Upstream
 

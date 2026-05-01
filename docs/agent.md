@@ -228,6 +228,21 @@ command = "codex-acp"
 args = []
 ```
 
+Minimal Claude config:
+
+```toml
+[editor.agent]
+enable = true
+default-agent = "claude"
+panel-position = "right"
+panel-size = 30
+
+[editor.agent.servers.claude]
+transport = "stdio"
+command = "claude-code-acp"
+args = []
+```
+
 `panel-position` supports:
 
 ```toml
@@ -298,5 +313,19 @@ With this map:
 curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
 ```
 
-The installer places `dhx`, `dhx-bin`, `codex-acp`, and the DoomHelix runtime
-under `~/.local` by default.
+The installer asks which ACP backend to install: Codex, Claude, both, or
+custom ACP / configure later.
+For non-interactive installs, set `DOOMHELIX_AGENT`:
+
+```sh
+DOOMHELIX_AGENT=codex curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
+DOOMHELIX_AGENT=claude curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
+DOOMHELIX_AGENT=both curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
+DOOMHELIX_AGENT=none curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
+```
+
+Codex installs `codex-acp`. Claude installs
+`@zed-industries/claude-code-acp` through npm and expects
+`claude-code-acp` on `PATH`. Use `DOOMHELIX_AGENT=none` when you want to wire a
+custom ACP-compatible agent manually. The installer writes a starter config
+only when `~/.config/doomhelix/config.toml` does not already exist.

@@ -9,8 +9,14 @@ prefix=${DOOMHELIX_PREFIX:-"$HOME/.local"}
 bin_dir=${DOOMHELIX_BIN_DIR:-"$prefix/bin"}
 share_dir=${DOOMHELIX_SHARE_DIR:-"$prefix/share/doomhelix"}
 runtime_dir=${DOOMHELIX_RUNTIME_DIR:-"$share_dir/runtime"}
-install_codex_acp=${DOOMHELIX_INSTALL_CODEX_ACP:-1}
+config_dir=${DOOMHELIX_CONFIG_DIR:-"$HOME/.config/doomhelix"}
+config_file=${DOOMHELIX_CONFIG_FILE:-"$config_dir/config.toml"}
+agent_choice=${DOOMHELIX_AGENT:-}
+noninteractive=${DOOMHELIX_NONINTERACTIVE:-0}
+install_codex_acp=${DOOMHELIX_INSTALL_CODEX_ACP:-}
 codex_acp_version=${CODEX_ACP_VERSION:-0.12.0}
+claude_acp_package=${CLAUDE_ACP_PACKAGE:-@zed-industries/claude-code-acp}
+claude_acp_command=${CLAUDE_ACP_COMMAND:-claude-code-acp}
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -30,6 +36,88 @@ copy_dir() {
 
 need install
 need tar
+
+choose_agent() {
+  if [ -n "$agent_choice" ]; then
+    printf '%s\n' "$agent_choice"
+    return
+  fi
+
+  if [ "$noninteractive" = 1 ]; then
+    printf '%s\n' codex
+    return
+  fi
+
+  if [ -r /dev/tty ]; then
+    {
+      printf '%s\n' \
+        'Install DoomHelix agent backend?' \
+        '  1) Codex (recommended)' \
+        '  2) Claude' \
+        '  3) Both' \
+        '  4) Custom ACP / configure later'
+      printf '%s' 'Choose [1]: '
+    } >/dev/tty
+    read answer </dev/tty
+  elif [ -t 0 ]; then
+    printf '%s\n' \
+      'Install DoomHelix agent backend?' \
+      '  1) Codex (recommended)' \
+      '  2) Claude' \
+      '  3) Both' \
+      '  4) Custom ACP / configure later'
+    printf '%s' 'Choose [1]: '
+    read answer
+  else
+    printf '%s\n' codex
+    return
+  fi
+
+  case "$answer" in
+    ""|1|codex|Codex) printf '%s\n' codex ;;
+    2|claude|Claude) printf '%s\n' claude ;;
+    3|both|Both) printf '%s\n' both ;;
+    4|custom|Custom|none|None|no|No) printf '%s\n' none ;;
+    *)
+      echo "error: unknown agent choice: $answer" >&2
+      exit 1
+      ;;
+  esac
+}
+
+selected_agent=$(choose_agent)
+case "$selected_agent" in
+  codex|claude|both|none) ;;
+  *)
+    echo "error: DOOMHELIX_AGENT must be codex, claude, both, or none" >&2
+    exit 1
+    ;;
+esac
+
+want_codex=0
+want_claude=0
+config_codex=0
+config_claude=0
+case "$selected_agent" in
+  codex)
+    want_codex=1
+    config_codex=1
+    ;;
+  claude)
+    want_claude=1
+    config_claude=1
+    ;;
+  both)
+    want_codex=1
+    want_claude=1
+    config_codex=1
+    config_claude=1
+    ;;
+esac
+
+if [ "$install_codex_acp" = 0 ]; then
+  want_codex=0
+fi
 
 download() {
   url=$1
@@ -129,7 +217,7 @@ install_prebuilt_doomhelix() {
 }
 
 install_codex_acp() {
-  if [ "$install_codex_acp" = 0 ]; then
+  if [ "$want_codex" = 0 ]; then
     return
   fi
 
@@ -150,7 +238,7 @@ install_codex_acp() {
   if ! download "$url" "$tmp_dir/$asset"; then
     rm -rf "$tmp_dir"
     echo "error: failed to download codex-acp from $url" >&2
-    echo "Set DOOMHELIX_INSTALL_CODEX_ACP=0 to skip this step." >&2
+    echo "Set DOOMHELIX_AGENT=none or DOOMHELIX_INSTALL_CODEX_ACP=0 to skip this step." >&2
     exit 1
   fi
 
@@ -172,6 +260,109 @@ install_codex_acp() {
 
   install -m 755 "$codex_acp_bin" "$bin_dir/codex-acp"
   rm -rf "$tmp_dir"
+}
+
+install_claude_acp() {
+  if [ "$want_claude" = 0 ]; then
+    return
+  fi
+
+  if command -v "$claude_acp_command" >/dev/null 2>&1; then
+    echo "$claude_acp_command already available on PATH; leaving it unchanged."
+    return
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "warning: npm was not found; skipping Claude ACP adapter install." >&2
+    echo "Install Node.js/npm, then run:" >&2
+    echo "  npm install -g ${claude_acp_package}" >&2
+    return
+  fi
+
+  echo "Installing Claude ACP adapter (${claude_acp_package})..."
+  npm install -g "$claude_acp_package"
+}
+
+write_default_config() {
+  if [ "$selected_agent" = none ]; then
+    return
+  fi
+
+  if [ -e "$config_file" ]; then
+    echo "DoomHelix config already exists; leaving it unchanged:"
+    echo "  $config_file"
+    return
+  fi
+
+  mkdir -p "$config_dir"
+  default_agent=$selected_agent
+  if [ "$default_agent" = both ]; then
+    default_agent=codex
+  fi
+
+  {
+    printf '%s\n' 'theme = "amberwood"'
+    printf '%s\n' ''
+    printf '%s\n' '[editor]'
+    printf '%s\n' 'line-number = "relative"'
+    printf '%s\n' 'mouse = true'
+    printf '%s\n' 'true-color = true'
+    printf '%s\n' ''
+    printf '%s\n' '[editor.agent]'
+    printf '%s\n' 'enable = true'
+    printf 'default-agent = "%s"\n' "$default_agent"
+    printf '%s\n' 'panel-position = "right"'
+    printf '%s\n' 'panel-size = 30'
+    printf '%s\n' 'auto-context-on-open = true'
+    printf '%s\n' 'include-theme = true'
+    printf '%s\n' 'include-command-history = true'
+    printf '%s\n' 'include-visible-buffer = true'
+    printf '%s\n' 'include-diagnostics = true'
+    printf '%s\n' 'require-approval-for-shell = true'
+
+    if [ "$config_codex" = 1 ]; then
+      printf '%s\n' ''
+      printf '%s\n' '[editor.agent.servers.codex]'
+      printf '%s\n' 'transport = "stdio"'
+      printf '%s\n' 'command = "codex-acp"'
+      printf '%s\n' 'args = []'
+    fi
+
+    if [ "$config_claude" = 1 ]; then
+      printf '%s\n' ''
+      printf '%s\n' '[editor.agent.servers.claude]'
+      printf '%s\n' 'transport = "stdio"'
+      printf 'command = "%s"\n' "$claude_acp_command"
+      printf '%s\n' 'args = []'
+    fi
+
+    printf '%s\n' ''
+    printf '%s\n' '[keys.normal.space.a]'
+    printf '%s\n' 'c = ":agent chat"'
+    printf '%s\n' 'e = ":agent explain"'
+    printf '%s\n' 'f = ":agent fix"'
+    printf '%s\n' 'r = ":agent refactor"'
+    printf '%s\n' 'E = ":agent edit"'
+    printf '%s\n' 'a = ":agent apply"'
+    printf '%s\n' 'p = ":agent patch"'
+    printf '%s\n' 'P = ":agent panel"'
+    printf '%s\n' 'R = ":agent restore"'
+    printf '%s\n' '"+" = ":agent resize +5"'
+    printf '%s\n' '"-" = ":agent resize -5"'
+    printf '%s\n' 's = ":agent start"'
+    printf '%s\n' 'x = ":agent clear"'
+    printf '%s\n' 'S = ":agent status"'
+    printf '%s\n' ''
+    printf '%s\n' '[keys.select.space.a]'
+    printf '%s\n' 'c = ":agent chat"'
+    printf '%s\n' 'e = ":agent explain"'
+    printf '%s\n' 'f = ":agent fix"'
+    printf '%s\n' 'r = ":agent refactor"'
+    printf '%s\n' 'E = ":agent edit"'
+  } >"$config_file"
+
+  echo "Wrote DoomHelix config:"
+  echo "  $config_file"
 }
 
 installed_prebuilt=0
@@ -219,6 +410,8 @@ if [ "$installed_prebuilt" = 0 ]; then
 fi
 
 install_codex_acp
+install_claude_acp
+write_default_config
 {
   printf '%s\n' '#!/bin/sh'
   printf 'HELIX_RUNTIME=%s exec %s/dhx-bin "$@"\n' "$runtime_dir" "$bin_dir"
@@ -232,11 +425,14 @@ printf '%s\n' \
   "  $bin_dir/dhx" \
   "  $bin_dir/dhx-bin" \
   '' \
-  'Codex ACP adapter:' \
-  "  $bin_dir/codex-acp" \
-  '' \
   'Runtime:' \
   "  $runtime_dir" \
+  '' \
+  'Config:' \
+  "  $config_file" \
+  '' \
+  'Agent backend:' \
+  "  $selected_agent" \
   '' \
   "Make sure '$bin_dir' is on PATH, then run:" \
   '  dhx'
