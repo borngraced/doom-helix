@@ -746,8 +746,7 @@ fn explain_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
 fn fix_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
     prompt_agent_turn(
         cx,
-        "Find the bug or problem in this selected code and propose a fix. Do not edit files yet."
-            .to_string(),
+        "Find and fix the bug or problem in this selected code.".to_string(),
         crate::agent::runtime::AgentTranscriptKind::Fix,
         false,
     )
@@ -756,7 +755,7 @@ fn fix_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
 fn refactor_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
     prompt_agent_turn(
         cx,
-        "Suggest a clean refactor for this selected code. Do not edit files yet.".to_string(),
+        "Refactor this selected code cleanly.".to_string(),
         crate::agent::runtime::AgentTranscriptKind::Refactor,
         false,
     )
@@ -765,7 +764,7 @@ fn refactor_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
 fn edit_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
     prompt_agent_turn(
         cx,
-        "Propose an edit for this selected code. Return a git-apply compatible unified diff patch only, with file paths and enough surrounding context. Do not modify files."
+        "Edit this selected code. Return a git-apply compatible unified diff patch with file paths and enough surrounding context."
             .to_string(),
         crate::agent::runtime::AgentTranscriptKind::Edit,
         true,
@@ -1218,6 +1217,16 @@ fn agent_prompt_with_formatting(
     format!("{prompt}\n\n{format_rules}\n- Current language id: `{language}`.")
 }
 
+fn visible_agent_prompt(kind: crate::agent::runtime::AgentTranscriptKind, prompt: &str) -> String {
+    match kind {
+        crate::agent::runtime::AgentTranscriptKind::Chat => prompt.trim().to_string(),
+        crate::agent::runtime::AgentTranscriptKind::Explain => "Explain".to_string(),
+        crate::agent::runtime::AgentTranscriptKind::Fix => "Fix".to_string(),
+        crate::agent::runtime::AgentTranscriptKind::Refactor => "Refactor".to_string(),
+        crate::agent::runtime::AgentTranscriptKind::Edit => "Edit".to_string(),
+    }
+}
+
 fn prompt_agent_turn(
     cx: &mut compositor::Context,
     prompt: String,
@@ -1227,8 +1236,7 @@ fn prompt_agent_turn(
     let launch_config = cx.editor.config().agent.launch_config()?;
     let handshake = crate::agent::acp::session_handshake(cx.editor)?;
     let snapshot = crate::agent::context::current_snapshot(cx.editor);
-    let transcript_prompt =
-        crate::agent::context::prompt_with_primary_selection_snapshot(&snapshot, prompt.trim());
+    let transcript_prompt = visible_agent_prompt(kind, prompt.trim());
     let prompt =
         agent_prompt_with_formatting(kind, &prompt, snapshot.active_file.language_id.as_deref());
     let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
