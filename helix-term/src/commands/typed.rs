@@ -2,7 +2,7 @@ use std::fmt::Write;
 use std::io::BufReader;
 use std::ops::{self, Deref};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 
 use crate::job::Job;
 
@@ -38,11 +38,13 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "panel",
     "patch",
     "prev",
+    "resize",
     "start",
     "status",
     "stop",
 ];
 static AGENT_PENDING_TURN_ID: AtomicU64 = AtomicU64::new(1);
+static AGENT_PANEL_SIZE_OVERRIDE: AtomicU16 = AtomicU16::new(0);
 
 #[derive(Clone)]
 pub struct TypableCommand {
@@ -745,6 +747,7 @@ fn open_agent_panel(cx: &mut compositor::Context, status: &'static str) {
     if created {
         place_agent_panel(cx.editor, position);
     }
+    resize_agent_panel(cx.editor, view_id);
     render_agent_transcript_editor(cx.editor, doc_id, view_id);
     cx.editor.set_status(status);
 }
@@ -758,6 +761,7 @@ fn clear_agent_panel(cx: &mut compositor::Context) {
     };
 
     let view_id = prepare_agent_transcript_doc(cx.editor, doc_id, Action::Replace);
+    resize_agent_panel(cx.editor, view_id);
     crate::agent::runtime::clear_transcript_turns();
     render_agent_transcript_editor(cx.editor, doc_id, view_id);
     cx.editor.set_status("Agent transcript cleared");
@@ -773,6 +777,7 @@ fn goto_agent_turn(cx: &mut compositor::Context, next: bool) {
 
     let scrolloff = cx.editor.config().scrolloff;
     let view_id = prepare_agent_transcript_doc(cx.editor, doc_id, Action::Replace);
+    resize_agent_panel(cx.editor, view_id);
     let doc = doc_mut!(cx.editor, &doc_id);
     let text = doc.text().slice(..).to_string();
     let cursor = doc
@@ -1158,6 +1163,52 @@ fn place_agent_panel(editor: &mut Editor, position: AgentPanelPosition) {
     }
 }
 
+fn resize_agent_panel(editor: &mut Editor, view_id: helix_view::ViewId) {
+    let panel_size = agent_panel_size(editor);
+    editor.tree.resize_view_to_percent(view_id, panel_size);
+}
+
+fn agent_panel_size(editor: &Editor) -> u16 {
+    match AGENT_PANEL_SIZE_OVERRIDE.load(Ordering::Relaxed) {
+        0 => editor.config().agent.panel_size,
+        size => size,
+    }
+}
+
+fn resize_agent_panel_command(cx: &mut compositor::Context, args: Args) -> anyhow::Result<()> {
+    let size_arg = args
+        .get(1)
+        .map(str::trim)
+        .filter(|arg| !arg.is_empty())
+        .context("agent resize requires a percentage, +delta, or -delta")?;
+
+    let current_size = agent_panel_size(cx.editor);
+    let new_size = if let Some(delta) = size_arg.strip_prefix('+') {
+        current_size.saturating_add(delta.parse::<u16>()?)
+    } else if let Some(delta) = size_arg.strip_prefix('-') {
+        current_size.saturating_sub(delta.parse::<u16>()?)
+    } else {
+        size_arg.parse::<u16>()?
+    }
+    .clamp(5, 95);
+
+    let Some(doc_id) = crate::agent::runtime::transcript_doc_id()
+        .filter(|doc_id| cx.editor.document(*doc_id).is_some())
+    else {
+        cx.editor.set_error("No agent panel is available");
+        return Ok(());
+    };
+
+    let view_id = agent_transcript_view_id(cx.editor, doc_id)
+        .unwrap_or_else(|| prepare_agent_transcript_doc(cx.editor, doc_id, Action::Replace));
+    AGENT_PANEL_SIZE_OVERRIDE.store(new_size, Ordering::Relaxed);
+    resize_agent_panel(cx.editor, view_id);
+    cx.editor
+        .set_status(format!("Agent panel resized to {new_size}%"));
+
+    Ok(())
+}
+
 fn agent_prompt_with_formatting(
     kind: crate::agent::runtime::AgentTranscriptKind,
     prompt: &str,
@@ -1407,6 +1458,7 @@ fn append_agent_pending_transcript_editor(
     if created {
         place_agent_panel(editor, position);
     }
+    resize_agent_panel(editor, view_id);
     let pending_id = AGENT_PENDING_TURN_ID.fetch_add(1, Ordering::Relaxed);
     crate::agent::runtime::append_transcript_turn(pending_id, kind, prompt.trim().to_string());
     render_agent_transcript_editor(editor, doc_id, view_id);
@@ -1430,6 +1482,7 @@ fn replace_agent_pending_transcript_editor(
     let position = editor.config().agent.panel_position;
     let action = agent_panel_action(position);
     let view_id = prepare_agent_transcript_doc(editor, pending_turn.doc_id, action);
+    resize_agent_panel(editor, view_id);
     crate::agent::runtime::complete_transcript_turn(pending_turn.id, contents.trim().to_string());
     render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
     let doc = doc_mut!(editor, &pending_turn.doc_id);
@@ -1458,6 +1511,7 @@ fn append_agent_streaming_transcript_editor(
     };
 
     render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
+    resize_agent_panel(editor, view_id);
     move_agent_transcript_cursor_to_end(editor, pending_turn.doc_id, view_id);
 
     Ok(())
@@ -1479,6 +1533,7 @@ fn update_agent_streaming_status_editor(
     };
 
     render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
+    resize_agent_panel(editor, view_id);
     move_agent_transcript_cursor_to_end(editor, pending_turn.doc_id, view_id);
 
     Ok(())
@@ -1496,6 +1551,7 @@ fn fail_agent_pending_transcript_editor(
     let position = editor.config().agent.panel_position;
     let action = agent_panel_action(position);
     let view_id = prepare_agent_transcript_doc(editor, pending_turn.doc_id, action);
+    resize_agent_panel(editor, view_id);
     crate::agent::runtime::fail_transcript_turn(pending_turn.id, contents);
     render_agent_transcript_editor(editor, pending_turn.doc_id, view_id);
     let doc = doc_mut!(editor, &pending_turn.doc_id);
@@ -1518,6 +1574,7 @@ fn cancel_agent_pending_turns(editor: &mut Editor) -> usize {
     let cancelled = crate::agent::runtime::cancel_pending_transcript_turns();
     if cancelled > 0 {
         let view_id = prepare_agent_transcript_doc(editor, doc_id, Action::Replace);
+        resize_agent_panel(editor, view_id);
         render_agent_transcript_editor(editor, doc_id, view_id);
     }
 
@@ -2054,6 +2111,7 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
             goto_agent_turn(cx, false);
             Ok(())
         }
+        Some("resize") => resize_agent_panel_command(cx, args),
         Some("clear") => {
             clear_agent_panel(cx);
             Ok(())

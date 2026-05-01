@@ -1,26 +1,53 @@
 # Agent Integration
 
-This is an experimental DoomHelix surface for exploring editor-native coding agents.
+DoomHelix turns Helix into an editor-native agent workspace. The agent is not a
+separate chat window: it receives structured editor context, streams into a
+real buffer, asks for approval before sensitive work, and produces patches that
+can be reviewed and applied without leaving the editor.
 
-The bundled Codex adapter uses Codex's long-lived `app-server` protocol. Codex can stream normal chat, request command/file approvals, and keep one backend thread alive across editor turns.
+The integration relies on ACP, the Agent Client Protocol used by Zed's agent
+integration. The default supported Codex path uses Zed's `codex-acp` adapter:
+it speaks ACP to DoomHelix and talks to Codex through Codex's long-lived
+`app-server` protocol. That gives DoomHelix one persistent backend thread
+across editor turns instead of spawning a fresh `codex exec` process for every
+prompt.
+
+## Features
+
+- Prompt-backed chat with streamed responses.
+- ACP transport compatible with stdio and WebSocket agent servers.
+- Default Codex support through Zed's `codex-acp` adapter.
+- `explain`, `fix`, `refactor`, and `edit` commands for selected code.
+- Active-file context for normal chat, even when the cursor is in the agent
+  panel.
+- Cursor-only selections are ignored, so a single character is not sent as
+  selected code by accident.
+- Selected code is included directly in the user-visible prompt with path and
+  line/column range.
+- Internal formatting instructions are hidden from the transcript.
+- One managed transcript panel per editor runtime.
+- Transcript restore after closing the panel.
+- Configurable panel position and initial size.
+- Keyboard panel resizing with `:agent resize`.
+- Markdown transcript that remains selectable and copyable.
+- `gd` on Markdown file links in the transcript opens the referenced file and
+  line in a normal code split.
+- Permission prompts for agent command/file requests.
+- Latest patch extraction, preview, confirmation, and apply.
+- Apply failures are shown with full diagnostics instead of statusline-only
+  truncation.
+- Buffers reload after successful agent-side edits.
 
 ## Commands
 
 `:agent`
 
 Opens a scratch buffer containing the current agent context snapshot as JSON.
+Use this when you want to inspect exactly what DoomHelix would send as context.
 
 `:agent context`
 
-Same as `:agent`. This exists as the explicit subcommand form.
-
-`:agent new`
-
-Opens a new agent session scratch buffer. The session currently contains a generated session id, initial status, a system message, and the full editor context.
-
-`:agent acp`
-
-Opens a dry-run ACP handshake payload as JSON. The payload currently previews the `initialize` and `session/new` messages DoomHelix would send to an ACP-compatible agent process. Editor-specific session context is attached under ACP's `_meta` extension field.
+Same as `:agent`.
 
 `:agent launch-config`
 
@@ -28,93 +55,120 @@ Opens the resolved default agent launch config from the active editor config.
 
 `:agent start`
 
-Starts the configured ACP agent process and sends the initial session handshake.
+Starts the configured ACP agent and performs the session handshake.
 
 `:agent status`
 
-Reports whether an agent process is currently registered as running.
+Shows whether an agent is stopped, running, or busy. When running, the status
+includes the current ACP session id when one is known.
 
 `:agent stop`
 
 Stops the registered agent process and clears the runtime slot.
 
-`:agent recv`
-
-Reads one framed JSON-RPC message from the running agent process and opens it in a JSON scratch buffer. This is a low-level debug command for inspecting raw ACP frames. Run this until `:agent status` shows a real session id instead of `<pending>`; many ACP servers reply to `initialize` before replying to `session/new`.
-If the agent exits before sending a response, DoomHelix reports the process exit status and any stderr output it can capture.
-
-`:agent prompt <text>`
-
-Sends a `session/prompt` request to the running agent. The prompt includes a fresh DoomHelix context snapshot under `_meta.helix.context`, so the agent sees the active file, cursor, selections, theme, mode, diagnostics, LSP servers, Git state, and recent commands at send time. After `:agent start`, run `:agent recv` until `:agent status` shows a real session id before sending prompts.
-
 `:agent chat`
 
-Opens an agent prompt in DoomHelix's prompt UI. When submitted, DoomHelix starts the configured agent if needed, sends the prompt with a fresh context snapshot, automatically reads any pending handshake messages, and streams agent response chunks into the transcript buffer as they arrive.
+Opens DoomHelix's prompt UI for a chat turn. DoomHelix starts the configured
+agent if needed, attaches a fresh context snapshot, appends your message to the
+transcript immediately, shows a working state, and streams the response into the
+agent panel.
 
 `:agent ask <text>`
 
-Sends a direct chat turn without opening the prompt UI. This uses the same structured transcript path as `:agent chat`.
+Sends a direct chat turn without opening the prompt UI.
 
 `:agent explain`
 
-Explains the current primary selection. The selected text is included directly in the prompt with file path and line/column range.
-Starts the configured agent first if needed.
+Explains the current primary selection. The selected text is included in the
+visible prompt with file path and line/column range.
 
 `:agent fix`
 
-Asks Codex to identify a problem in the current primary selection and propose a fix.
-Starts the configured agent first if needed.
+Asks the agent to identify the problem in the current selection and propose a
+fix.
 
 `:agent refactor`
 
-Asks Codex to suggest a clean refactor for the current primary selection.
-Starts the configured agent first if needed.
+Asks the agent to suggest a clean refactor for the current selection.
 
 `:agent edit`
 
-Asks Codex to edit the current primary selection. When Codex needs to run commands or write files, DoomHelix prompts for approval.
-Starts the configured agent first if needed.
+Asks the agent to edit the current selection. The agent is allowed to request
+tool permissions through ACP; DoomHelix shows an approval prompt before
+granting command or file access.
 
 `:agent patch`
 
-Opens the latest stored agent patch proposal in a diff scratch buffer.
+Opens the latest extracted patch proposal in a diff scratch buffer.
 
 `:agent apply`
 
-Prompts for confirmation, then applies the latest stored agent patch with `git apply --whitespace=nowarn -`.
+Prompts for confirmation, then applies the latest stored patch with
+`git apply --whitespace=nowarn -`. On success, the patch buffer is closed and
+changed buffers are reloaded. On failure, the full apply diagnostic is shown in
+an editor buffer.
 
 `:agent panel`
 
-Opens or focuses the agent transcript buffer. The split direction follows `[editor.agent].panel-position`.
-There is one agent transcript per running agent runtime; new chat/action turns append to that transcript.
+Opens or focuses the single transcript panel. The split direction follows
+`[editor.agent].panel-position`.
 
 `:agent restore`
 
-Restores the single agent transcript panel from the saved transcript state if the split was closed. This does not restart the agent or create a new conversation.
+Restores the transcript panel from the in-memory transcript state if the split
+was closed. This does not restart the agent or create a new conversation.
 
 `:agent next`
 
-Moves the cursor to the next turn in the agent transcript.
+Moves the cursor to the next turn in the transcript.
 
 `:agent prev`
 
-Moves the cursor to the previous turn in the agent transcript.
+Moves the cursor to the previous turn in the transcript.
+
+`:agent resize <size|+delta|-delta>`
+
+Resizes only the agent transcript panel for the current editor session.
+
+Examples:
+
+```text
+:agent resize 40
+:agent resize +5
+:agent resize -5
+```
+
+Values are clamped between 5% and 95%. Runtime resizing overrides
+`panel-size` until the editor exits.
 
 `:agent clear`
 
-Clears the agent transcript buffer without stopping the running agent process.
+Clears the transcript buffer without stopping the running agent process.
 
-`:agent-context`
+## Transcript Panel
 
-Compatibility command that opens the same context snapshot directly.
+The transcript panel is a normal editor buffer, so selection, cursor rendering,
+copying, searching, and code fences behave predictably. DoomHelix uses Markdown
+source rendering rather than a transformed preview so raw buffer positions stay
+aligned with the cursor and selection overlay.
 
-`:agent-new`
+DoomHelix keeps one transcript panel per editor runtime. This keeps message
+routing clear: every chat/action turn appends to the same transcript instead of
+creating disconnected panels.
 
-Compatibility command that opens the same new session buffer directly.
+When an agent response contains file links like:
 
-## Current Context Fields
+```markdown
+[services/user_interfaces.go:179](/home/user/project/services/user_interfaces.go:179)
+```
 
-The snapshot currently includes:
+pressing `gd` on the link in the transcript opens that file and line in a normal
+code split.
+
+## Context
+
+Each agent turn receives a fresh context snapshot. Depending on config, that can
+include:
 
 - workspace root
 - current working directory
@@ -123,18 +177,37 @@ The snapshot currently includes:
 - active file metadata
 - cursor position
 - visible range
-- selections and selected text
+- real selections and selected text
 - open buffers
 - diagnostics
 - active language servers
 - Git branch and changed files
 - recent `:` commands
 
+When the agent panel is focused, DoomHelix uses the last active real file from
+that panel's view history as the coding context. This makes prompts like
+`review this file` work naturally after interacting with the transcript.
+
+## Permissions
+
+ACP permission requests are handled inside DoomHelix. When Codex requests
+command execution or file changes, `codex-acp` sends
+`session/request_permission`; DoomHelix shows a `[y/N]` prompt with the request
+details and sends the selected ACP permission option back to the agent.
+
+This is why DoomHelix uses the ACP `codex-acp` adapter instead of shelling out
+to `codex exec`. Plain `codex exec` is not a good editor backend for
+interactive approval because it is process-oriented rather than session-oriented.
+
 ## Configuration
 
-The fork supports an experimental `[editor.agent]` table:
+DoomHelix reads user config from:
 
-DoomHelix reads user config from `~/.config/doomhelix/config.toml`.
+```text
+~/.config/doomhelix/config.toml
+```
+
+Minimal Codex config:
 
 ```toml
 [editor.agent]
@@ -155,17 +228,34 @@ command = "codex-acp"
 args = []
 ```
 
-The process-spawning layer resolves the configured `default-agent` from this table.
-Agent servers can use `transport = "stdio"` or `transport = "websocket"`. Stdio servers launch `command` with `args` and speak ACP using newline-delimited JSON-RPC. WebSocket servers connect to `url` and exchange one ACP JSON-RPC message per text or binary WebSocket frame. If a websocket server has `command` and `args`, DoomHelix starts that command before connecting.
-Use `codex-acp` for Codex. It is the supported adapter for real ACP permission prompts.
+`panel-position` supports:
 
-`panel-position` controls where a new agent transcript split opens. Supported values are `left`, `right`, `top`, and `bottom`. `panel-size` is stored as a percentage for the intended panel size; the current split implementation opens an equal-sized split, and exact percentage sizing is reserved for a later weighted-split pass.
+```toml
+panel-position = "left"
+panel-position = "right"
+panel-position = "top"
+panel-position = "bottom"
+```
 
-When Codex requests command execution or file changes, `codex-acp` sends `session/request_permission` to DoomHelix. DoomHelix shows a `[y/N]` prompt with the request details and returns the selected ACP permission option.
+`panel-size` is the initial percentage size for the transcript panel. Runtime
+resizes through `:agent resize` apply only to the current editor session.
+
+## WebSocket Transport
+
+ACP servers can use stdio or WebSocket transport.
+
+```toml
+[editor.agent.servers.codex-ws]
+transport = "websocket"
+url = "ws://127.0.0.1:9000/acp"
+command = "codex-acp"
+args = ["--websocket", "127.0.0.1:9000"]
+```
+
+For WebSocket servers, DoomHelix starts `command` when provided, then connects
+to `url`. Each WebSocket text or binary frame carries one ACP JSON-RPC message.
 
 ## Suggested Keymap
-
-Add local bindings for the common agent actions:
 
 ```toml
 [keys.normal.space.a]
@@ -178,6 +268,8 @@ a = ":agent apply"
 p = ":agent patch"
 P = ":agent panel"
 R = ":agent restore"
+"+" = ":agent resize +5"
+"-" = ":agent resize -5"
 s = ":agent start"
 x = ":agent clear"
 S = ":agent status"
@@ -190,13 +282,21 @@ r = ":agent refactor"
 E = ":agent edit"
 ```
 
-With this map, select code and press `<space>a e` to explain it, `<space>a f` to ask for a fix proposal, `<space>a r` to ask for a refactor proposal, or `<space>a E` to ask for a unified diff edit proposal. Use `<space>a p` to inspect the latest patch and `<space>a a` to apply it after confirmation.
+With this map:
 
-## Near-Term Direction
+- select code and press `<space>a e` to explain it
+- select code and press `<space>a f` to ask for a fix
+- select code and press `<space>a r` to ask for a refactor
+- select code and press `<space>a E` to request a patch
+- press `<space>a p` to inspect the latest patch
+- press `<space>a a` to apply after confirmation
+- press `<space>a +` or `<space>a -` to resize the agent panel
 
-The next implementation steps are:
+## Installation
 
-1. Spawn an external ACP-compatible subprocess.
-2. Send `initialize` and `session/new` JSON-RPC messages over stdio using newline-delimited JSON-RPC.
-3. Render responses in an agent buffer.
-4. Add explicit permission gates before any write, shell, or command-execution tool.
+```sh
+curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
+```
+
+The installer places `dhx`, `dhx-bin`, `codex-acp`, and the DoomHelix runtime
+under `~/.local` by default.

@@ -29,14 +29,11 @@ use helix_view::{
     graphics::{Color, CursorKind, Modifier, Rect, Style},
     input::{KeyEvent, MouseButton, MouseEvent, MouseEventKind},
     keyboard::{KeyCode, KeyModifiers},
-    Document, DocumentId, Editor, Theme, View,
+    Document, Editor, Theme, View,
 };
-use std::{cell::RefCell, mem::take, num::NonZeroUsize, ops, path::PathBuf, rc::Rc};
+use std::{mem::take, num::NonZeroUsize, ops, path::PathBuf, rc::Rc};
 
-use tui::{
-    buffer::Buffer as Surface,
-    text::{Span, Spans, Text},
-};
+use tui::{buffer::Buffer as Surface, text::Span};
 
 pub struct EditorView {
     pub keymaps: Keymaps,
@@ -45,52 +42,8 @@ pub struct EditorView {
     pub(crate) last_insert: (commands::MappableCommand, Vec<InsertEvent>),
     pub(crate) completion: Option<Completion>,
     spinners: ProgressSpinners,
-    agent_markdown_cache: RefCell<Option<AgentMarkdownRenderCache>>,
     /// Tracks if the terminal window is focused by reaction to terminal focus events
     terminal_focused: bool,
-}
-
-struct AgentMarkdownRenderCache {
-    doc_id: DocumentId,
-    version: i32,
-    text: Text<'static>,
-    rendered_scroll_anchor: Option<(usize, u16)>,
-}
-
-fn markdown_text_into_static(text: Text<'_>) -> Text<'static> {
-    Text {
-        lines: text
-            .lines
-            .into_iter()
-            .map(|line| {
-                Spans(
-                    line.0
-                        .into_iter()
-                        .map(|span| Span::styled(span.content.into_owned(), span.style))
-                        .collect(),
-                )
-            })
-            .collect(),
-    }
-}
-
-fn rendered_agent_markdown_scroll(
-    cache: &mut AgentMarkdownRenderCache,
-    doc: &Document,
-    anchor: usize,
-    editor: &Editor,
-) -> u16 {
-    if let Some((cached_anchor, scroll)) = cache.rendered_scroll_anchor {
-        if cached_anchor == anchor {
-            return scroll;
-        }
-    }
-
-    let prefix = doc.text().slice(..anchor).to_string();
-    let markdown = crate::ui::Markdown::new(prefix, editor.syn_loader.clone());
-    let scroll = markdown.parse(None).lines.len().min(u16::MAX as usize) as u16;
-    cache.rendered_scroll_anchor = Some((anchor, scroll));
-    scroll
 }
 
 #[derive(Debug, Clone)]
@@ -113,7 +66,6 @@ impl EditorView {
             last_insert: (commands::MappableCommand::normal_mode, Vec::new()),
             completion: None,
             spinners: ProgressSpinners::default(),
-            agent_markdown_cache: RefCell::new(None),
             terminal_focused: true,
         }
     }
@@ -137,14 +89,6 @@ impl EditorView {
         let loader = editor.syn_loader.load();
 
         let view_offset = doc.view_offset(view.id);
-
-        if Self::is_agent_transcript_doc(doc) && editor.mode() != Mode::Select {
-            self.render_agent_transcript_markdown(editor, doc, view, surface);
-            self.render_view_border_and_statusline(
-                editor, doc, view, viewport, surface, is_focused,
-            );
-            return;
-        }
 
         let text_annotations = view.text_annotations(doc, Some(theme));
         let mut decorations = DecorationManager::default();
@@ -310,54 +254,6 @@ impl EditorView {
             statusline::RenderContext::new(editor, doc, view, is_focused, &self.spinners);
 
         statusline::render(&mut context, statusline_area, surface);
-    }
-
-    fn is_agent_transcript_doc(doc: &Document) -> bool {
-        doc.path().is_none() && doc.display_name() == "[agent]"
-    }
-
-    fn render_agent_transcript_markdown(
-        &self,
-        editor: &Editor,
-        doc: &Document,
-        view: &View,
-        surface: &mut Surface,
-    ) {
-        use tui::widgets::{Paragraph, Widget, Wrap};
-
-        let viewport = view.inner_area(doc);
-        if viewport.area() == 0 {
-            return;
-        }
-
-        let mut cache = self.agent_markdown_cache.borrow_mut();
-        let cache_is_current = cache
-            .as_ref()
-            .is_some_and(|cache| cache.doc_id == doc.id() && cache.version == doc.version());
-        if !cache_is_current {
-            let contents = doc.text().to_string();
-            let markdown = super::Markdown::new(contents, editor.syn_loader.clone());
-            let text = markdown_text_into_static(markdown.parse(Some(&editor.theme)));
-            *cache = Some(AgentMarkdownRenderCache {
-                doc_id: doc.id(),
-                version: doc.version(),
-                text,
-                rendered_scroll_anchor: None,
-            });
-        }
-        let anchor = doc.view_offset(view.id).anchor.min(doc.text().len_chars());
-        let scroll = rendered_agent_markdown_scroll(
-            cache.as_mut().expect("agent markdown cache populated"),
-            doc,
-            anchor,
-            editor,
-        );
-        let text = &cache.as_ref().expect("agent markdown cache populated").text;
-        let paragraph = Paragraph::new(text)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0));
-
-        paragraph.render(viewport, surface);
     }
 
     pub fn render_rulers(

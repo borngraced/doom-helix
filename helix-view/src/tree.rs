@@ -360,13 +360,15 @@ impl Tree {
             return;
         }
 
-        self.stack.push((self.root, self.area));
+        self.layout_node(self.root, self.area);
+    }
 
-        // take the area
-        // fetch the node
+    fn layout_node(&mut self, key: ViewId, area: Rect) {
+        self.stack.push((key, area));
+
+        // Take the area, fetch the node:
         // a) node is view, give it whole area
         // b) node is container, calculate areas for each child and push them on the stack
-
         while let Some((key, area)) = self.stack.pop() {
             let node = &mut self.nodes[key];
 
@@ -439,6 +441,86 @@ impl Tree {
                 }
             }
         }
+    }
+
+    pub fn resize_view_to_percent(&mut self, view_id: ViewId, percent: u16) -> Option<()> {
+        let parent = self.nodes[view_id].parent;
+        let (layout, parent_area, children) = match &self.nodes[parent].content {
+            Content::Container(container) => {
+                (container.layout, container.area, container.children.clone())
+            }
+            Content::View(_) => return None,
+        };
+        let child_count = children.len();
+        if child_count < 2 || !children.contains(&view_id) {
+            return None;
+        }
+
+        let sibling_count = child_count - 1;
+        let percent = percent.clamp(5, 95);
+
+        let inner_gap = match layout {
+            Layout::Horizontal => 0,
+            Layout::Vertical => 1,
+        };
+        let total_gap = inner_gap * child_count.saturating_sub(1) as u16;
+        let total_size = match layout {
+            Layout::Horizontal => parent_area.height,
+            Layout::Vertical => parent_area.width,
+        };
+        let available = match layout {
+            Layout::Horizontal => parent_area.height,
+            Layout::Vertical => parent_area.width.saturating_sub(total_gap),
+        };
+        if available < child_count as u16 {
+            return None;
+        }
+
+        let min_size = 1;
+        let max_target_size = available.saturating_sub(sibling_count as u16 * min_size);
+        let target_size = ((total_size as u32 * percent as u32) / 100)
+            .clamp(min_size as u32, max_target_size as u32) as u16;
+        let remaining = available.saturating_sub(target_size);
+        let sibling_base = remaining / sibling_count as u16;
+        let mut sibling_remainder = remaining % sibling_count as u16;
+
+        let mut sizes = Vec::with_capacity(child_count);
+        for child in &children {
+            if *child == view_id {
+                sizes.push(target_size);
+            } else {
+                let extra = u16::from(sibling_remainder > 0);
+                sibling_remainder = sibling_remainder.saturating_sub(extra);
+                sizes.push(sibling_base + extra);
+            }
+        }
+
+        match layout {
+            Layout::Horizontal => {
+                let mut child_y = parent_area.y;
+                for (index, (child, size)) in children.iter().zip(sizes).enumerate() {
+                    let mut area = Rect::new(parent_area.x, child_y, parent_area.width, size);
+                    child_y += size;
+                    if index == child_count - 1 {
+                        area.height = parent_area.y + parent_area.height - area.y;
+                    }
+                    self.layout_node(*child, area);
+                }
+            }
+            Layout::Vertical => {
+                let mut child_x = parent_area.x;
+                for (index, (child, size)) in children.iter().zip(sizes).enumerate() {
+                    let mut area = Rect::new(child_x, parent_area.y, size, parent_area.height);
+                    child_x += size + inner_gap;
+                    if index == child_count - 1 {
+                        area.width = parent_area.x + parent_area.width - area.x;
+                    }
+                    self.layout_node(*child, area);
+                }
+            }
+        }
+
+        Some(())
     }
 
     pub fn traverse(&self) -> Traverse<'_> {
@@ -964,5 +1046,47 @@ mod test {
                 .map(|(view, _)| view.area.width)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn resize_view_to_percent_sets_vertical_split_width() {
+        let mut tree = Tree::new(Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 40,
+        });
+        let view = View::new(DocumentId::default(), GutterConfig::default());
+        tree.insert(view);
+        let view = View::new(DocumentId::default(), GutterConfig::default());
+        tree.split(view, Layout::Vertical);
+        let right = tree.focus;
+
+        tree.resize_view_to_percent(right, 30).unwrap();
+
+        let right_view = tree.get(right);
+        assert_eq!(30, right_view.area.width);
+        assert_eq!(70, right_view.area.x);
+    }
+
+    #[test]
+    fn resize_view_to_percent_sets_horizontal_split_height() {
+        let mut tree = Tree::new(Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 40,
+        });
+        let view = View::new(DocumentId::default(), GutterConfig::default());
+        tree.insert(view);
+        let view = View::new(DocumentId::default(), GutterConfig::default());
+        tree.split(view, Layout::Horizontal);
+        let bottom = tree.focus;
+
+        tree.resize_view_to_percent(bottom, 25).unwrap();
+
+        let bottom_view = tree.get(bottom);
+        assert_eq!(10, bottom_view.area.height);
+        assert_eq!(30, bottom_view.area.y);
     }
 }

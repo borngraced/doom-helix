@@ -14,8 +14,8 @@ use tui::{text::Span, widgets::Row};
 use super::{align_view, push_jump, Align, Context, Editor};
 
 use helix_core::{
-    diagnostic::DiagnosticProvider, syntax::config::LanguageServerFeature,
-    text_annotations::InlineAnnotation, Selection, Uri,
+    diagnostic::DiagnosticProvider, line_ending::line_end_char_index,
+    syntax::config::LanguageServerFeature, text_annotations::InlineAnnotation, Selection, Uri,
 };
 use helix_stdx::path;
 use helix_view::{
@@ -23,7 +23,7 @@ use helix_view::{
     editor::Action,
     handlers::lsp::SignatureHelpInvoked,
     theme::Style,
-    Document, View,
+    Document, DocumentId, View, ViewId,
 };
 
 use crate::{
@@ -32,7 +32,13 @@ use crate::{
     ui::{self, overlay::overlaid, FileLocation, Picker, Popup, PromptEvent},
 };
 
-use std::{cmp::Ordering, collections::HashSet, fmt::Display, future::Future, path::Path};
+use std::{
+    cmp::Ordering,
+    collections::HashSet,
+    fmt::Display,
+    future::Future,
+    path::{Path, PathBuf},
+};
 
 /// Gets the first language server that is attached to a document which supports a specific feature.
 /// If there is no configured language server that supports the feature, this displays a status message.
@@ -156,6 +162,213 @@ fn jump_to_position(
     doc.set_selection(view.id, Selection::single(new_range.head, new_range.anchor));
     if action.align_view(view, doc.id()) {
         align_view(doc, view, Align::Center);
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct AgentMarkdownLinkTarget {
+    path: PathBuf,
+    line: Option<usize>,
+    column: Option<usize>,
+}
+
+fn goto_agent_markdown_link(cx: &mut Context) -> bool {
+    let Some(transcript_doc_id) = crate::agent::runtime::transcript_doc_id() else {
+        return false;
+    };
+
+    let target = {
+        let (view, doc) = current_ref!(cx.editor);
+        if doc.id() != transcript_doc_id || doc.display_name() != "[agent]" {
+            return false;
+        }
+
+        let text = doc.text().slice(..);
+        let cursor = doc.selection(view.id).primary().cursor(text);
+        let line_idx = text.char_to_line(cursor);
+        let line_start = text.line_to_char(line_idx);
+        let line = text.line(line_idx).to_string();
+        let cursor_in_line = cursor.saturating_sub(line_start);
+
+        let Some(target) = markdown_link_target_at_cursor(&line, cursor_in_line) else {
+            return false;
+        };
+
+        let Some(target) = parse_agent_markdown_link_target(&target) else {
+            cx.editor
+                .set_error(format!("Could not resolve agent link target: {target}"));
+            return true;
+        };
+
+        target
+    };
+
+    if let Some(view_id) = agent_link_target_view(cx.editor, transcript_doc_id) {
+        cx.editor.focus(view_id);
+    }
+
+    let doc_id = match cx.editor.open(&target.path, Action::Replace) {
+        Ok(doc_id) => doc_id,
+        Err(err) => {
+            cx.editor
+                .set_error(format!("Open file failed: {:?}: {:?}", target.path, err));
+            return true;
+        }
+    };
+
+    if let Some(line) = target.line {
+        let view_id = view!(cx.editor).id;
+        let scrolloff = cx.editor.config().scrolloff;
+        let doc = doc_mut!(cx.editor, &doc_id);
+        let text = doc.text().slice(..);
+        let max_line = text.len_lines().saturating_sub(1);
+        let line_idx = line.saturating_sub(1).min(max_line);
+        let line_start = text.line_to_char(line_idx);
+        let line_end = line_end_char_index(&text, line_idx);
+        let column = target.column.unwrap_or(1).saturating_sub(1);
+        let pos = (line_start + column).min(line_end);
+        doc.set_selection(view_id, Selection::point(pos));
+        let view = view_mut!(cx.editor, view_id);
+        view.ensure_cursor_in_view(doc, scrolloff);
+        align_view(doc, view, Align::Center);
+    }
+
+    true
+}
+
+fn agent_link_target_view(editor: &Editor, transcript_doc_id: DocumentId) -> Option<ViewId> {
+    let focused_view = editor.tree.try_get(editor.tree.focus)?;
+
+    for doc_id in focused_view.docs_access_history.iter().rev() {
+        if *doc_id == transcript_doc_id {
+            continue;
+        }
+
+        if let Some((view, _)) = editor
+            .tree
+            .views()
+            .find(|(view, _)| view.doc == *doc_id && view.doc != transcript_doc_id)
+        {
+            return Some(view.id);
+        }
+    }
+
+    editor
+        .tree
+        .views()
+        .find(|(view, focused)| {
+            !*focused
+                && view.doc != transcript_doc_id
+                && editor
+                    .document(view.doc)
+                    .is_some_and(|document| document.path().is_some())
+        })
+        .map(|(view, _)| view.id)
+}
+
+fn markdown_link_target_at_cursor(line: &str, cursor: usize) -> Option<String> {
+    let mut search_start = 0;
+
+    while let Some(open_rel) = line[search_start..].find('[') {
+        let open = search_start + open_rel;
+        let Some(close_rel) = line[open + 1..].find(']') else {
+            break;
+        };
+        let close = open + 1 + close_rel;
+        if !line[close + 1..].starts_with('(') {
+            search_start = close + 1;
+            continue;
+        }
+
+        let target_start = close + 2;
+        let Some(target_end_rel) = line[target_start..].find(')') else {
+            break;
+        };
+        let target_end = target_start + target_end_rel;
+        let link_end = target_end + 1;
+        let link_start_chars = line[..open].chars().count();
+        let link_end_chars = line[..link_end].chars().count();
+
+        if link_start_chars <= cursor && cursor <= link_end_chars {
+            let target = line[target_start..target_end].trim();
+            let target = target
+                .strip_prefix('<')
+                .and_then(|target| target.strip_suffix('>'))
+                .unwrap_or(target)
+                .trim();
+            if !target.is_empty() {
+                return Some(target.to_string());
+            }
+        }
+
+        search_start = link_end;
+    }
+
+    None
+}
+
+fn parse_agent_markdown_link_target(target: &str) -> Option<AgentMarkdownLinkTarget> {
+    let target = target.strip_prefix("file://").unwrap_or(target);
+    let (path, line, column) = split_path_line_column(target);
+    let expanded = path::expand(path);
+    Some(AgentMarkdownLinkTarget {
+        path: helix_stdx::env::current_working_dir().join(expanded),
+        line,
+        column,
+    })
+}
+
+fn split_path_line_column(target: &str) -> (&str, Option<usize>, Option<usize>) {
+    let Some((path_or_path_line, last)) = target.rsplit_once(':') else {
+        return (target, None, None);
+    };
+
+    let Ok(last_number) = last.parse::<usize>() else {
+        return (target, None, None);
+    };
+
+    let Some((path, maybe_line)) = path_or_path_line.rsplit_once(':') else {
+        return (path_or_path_line, Some(last_number), None);
+    };
+
+    match maybe_line.parse::<usize>() {
+        Ok(line) => (path, Some(line), Some(last_number)),
+        Err(_) => (path_or_path_line, Some(last_number), None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{markdown_link_target_at_cursor, split_path_line_column};
+
+    #[test]
+    fn finds_markdown_link_target_from_link_text_or_url() {
+        let line = "- Low: [services/user_interfaces.go:179](/home/me/app/services/user_interfaces.go:179) duplicates";
+
+        assert_eq!(
+            markdown_link_target_at_cursor(line, 10).as_deref(),
+            Some("/home/me/app/services/user_interfaces.go:179")
+        );
+        assert_eq!(
+            markdown_link_target_at_cursor(line, 55).as_deref(),
+            Some("/home/me/app/services/user_interfaces.go:179")
+        );
+    }
+
+    #[test]
+    fn parses_path_line_and_column_suffixes() {
+        assert_eq!(
+            split_path_line_column("/home/me/app/main.go:12"),
+            ("/home/me/app/main.go", Some(12), None)
+        );
+        assert_eq!(
+            split_path_line_column("/home/me/app/main.go:12:4"),
+            ("/home/me/app/main.go", Some(12), Some(4))
+        );
+        assert_eq!(
+            split_path_line_column("/home/me/app/main.go"),
+            ("/home/me/app/main.go", None, None)
+        );
     }
 }
 
@@ -959,6 +1172,10 @@ pub fn goto_declaration(cx: &mut Context) {
 }
 
 pub fn goto_definition(cx: &mut Context) {
+    if goto_agent_markdown_link(cx) {
+        return;
+    }
+
     goto_single_impl(
         cx,
         LanguageServerFeature::GotoDefinition,

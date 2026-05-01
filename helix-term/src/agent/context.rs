@@ -116,10 +116,7 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
     let (view, doc) = current_ref!(editor);
     let transcript_doc_id = super::runtime::transcript_doc_id();
     let doc = if doc.path().is_none() && Some(doc.id()) == transcript_doc_id {
-        editor
-            .documents()
-            .find(|document| document.path().is_some() && Some(document.id()) != transcript_doc_id)
-            .unwrap_or(doc)
+        agent_context_document(editor, view, transcript_doc_id).unwrap_or(doc)
     } else {
         doc
     };
@@ -253,6 +250,26 @@ pub fn current_snapshot(editor: &Editor) -> EditorSnapshot {
         git,
         recent_commands,
     }
+}
+
+fn agent_context_document<'a>(
+    editor: &'a Editor,
+    view: &helix_view::View,
+    transcript_doc_id: Option<helix_view::DocumentId>,
+) -> Option<&'a helix_view::Document> {
+    view.docs_access_history
+        .iter()
+        .rev()
+        .find_map(|doc_id| {
+            editor.document(*doc_id).filter(|document| {
+                document.path().is_some() && Some(document.id()) != transcript_doc_id
+            })
+        })
+        .or_else(|| {
+            editor.documents().find(|document| {
+                document.path().is_some() && Some(document.id()) != transcript_doc_id
+            })
+        })
 }
 
 pub fn current_snapshot_pretty(editor: &Editor) -> anyhow::Result<String> {
