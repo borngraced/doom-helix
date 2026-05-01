@@ -2,6 +2,7 @@ use std::fmt::Write;
 use std::io::BufReader;
 use std::ops::{self, Deref};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::job::Job;
 
@@ -39,6 +40,7 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "recv",
     "prompt",
 ];
+static AGENT_PENDING_TURN_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 pub struct TypableCommand {
@@ -1076,16 +1078,15 @@ fn open_agent_json_scratch_editor(editor: &mut Editor, contents: String) -> anyh
 }
 
 #[derive(Debug, Clone, Copy)]
-struct AgentPendingRange {
+struct AgentPendingTurn {
     doc_id: helix_view::DocumentId,
-    response_start: usize,
-    response_end: usize,
+    id: u64,
 }
 
 fn append_agent_pending_transcript_editor(
     editor: &mut Editor,
     prompt: &str,
-) -> anyhow::Result<AgentPendingRange> {
+) -> anyhow::Result<AgentPendingTurn> {
     let position = editor.config().agent.panel_position;
     let action = agent_panel_action(position);
     let (doc_id, created) = agent_transcript_doc_id(editor, action);
@@ -1101,52 +1102,72 @@ fn append_agent_pending_transcript_editor(
     } else {
         "\n\n---\n\n".to_string()
     };
-    let pending = "Working...";
+    let pending_id = AGENT_PENDING_TURN_ID.fetch_add(1, Ordering::Relaxed);
+    let pending = agent_pending_marker(pending_id);
     let header = format!("{prefix}**You:**\n\n{}\n\n**Codex:**\n\n", prompt.trim());
-    let response_start = doc.text().len_chars() + header.chars().count();
-    let response_end = response_start + pending.chars().count();
     let insertion = format!("{header}{pending}\n");
 
     insert_agent_transcript_text(doc, view_id, insertion);
     doc.set_language_by_language_id("markdown", &loader).ok();
 
-    Ok(AgentPendingRange {
+    Ok(AgentPendingTurn {
         doc_id,
-        response_start,
-        response_end,
+        id: pending_id,
     })
 }
 
 fn replace_agent_pending_transcript_editor(
     editor: &mut Editor,
-    pending_range: AgentPendingRange,
+    pending_turn: AgentPendingTurn,
     contents: String,
 ) -> anyhow::Result<()> {
-    if editor.document(pending_range.doc_id).is_none() {
-        let _ = append_agent_pending_transcript_editor(editor, "(original prompt unavailable)")?;
+    if editor.document(pending_turn.doc_id).is_none() {
+        append_agent_response_to_transcript(editor, "(original prompt unavailable)", &contents)?;
+        return Ok(());
     }
 
     let position = editor.config().agent.panel_position;
     let action = agent_panel_action(position);
-    let view_id = prepare_agent_transcript_doc(editor, pending_range.doc_id, action);
-    let doc = doc_mut!(editor, &pending_range.doc_id);
+    let view_id = prepare_agent_transcript_doc(editor, pending_turn.doc_id, action);
+    let doc = doc_mut!(editor, &pending_turn.doc_id);
+    let marker = agent_pending_marker(pending_turn.id);
+    let Some((response_start, response_end)) = find_doc_text_char_range(doc, &marker) else {
+        append_agent_response_to_transcript(editor, "(pending marker not found)", &contents)?;
+        return Ok(());
+    };
     let replacement = format!("{}\n", contents.trim());
     let transaction = Transaction::change(
         doc.text(),
-        [(
-            pending_range.response_start,
-            pending_range.response_end,
-            Some(replacement.into()),
-        )]
-        .into_iter(),
+        [(response_start, response_end, Some(replacement.into()))].into_iter(),
     );
     doc.apply(&transaction, view_id);
-    doc.set_selection(view_id, Selection::point(pending_range.response_start));
+    doc.set_selection(view_id, Selection::point(response_start));
     let scrolloff = editor.config().scrolloff;
     let (view, doc) = current!(editor);
     view.ensure_cursor_in_view(doc, scrolloff);
 
     Ok(())
+}
+
+fn agent_pending_marker(id: u64) -> String {
+    format!("Working... [turn {id}]")
+}
+
+fn find_doc_text_char_range(doc: &helix_view::Document, needle: &str) -> Option<(usize, usize)> {
+    let haystack = doc.text().slice(..).to_string();
+    let start_byte = haystack.find(needle)?;
+    let end_byte = start_byte + needle.len();
+    let text = doc.text();
+    Some((text.byte_to_char(start_byte), text.byte_to_char(end_byte)))
+}
+
+fn append_agent_response_to_transcript(
+    editor: &mut Editor,
+    prompt: &str,
+    contents: &str,
+) -> anyhow::Result<()> {
+    let pending_turn = append_agent_pending_transcript_editor(editor, prompt)?;
+    replace_agent_pending_transcript_editor(editor, pending_turn, contents.to_string())
 }
 
 fn agent_transcript_doc_id(editor: &mut Editor, action: Action) -> (helix_view::DocumentId, bool) {
