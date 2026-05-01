@@ -1,6 +1,7 @@
 use std::fmt::Write;
 use std::io::BufReader;
 use std::ops::{self, Deref};
+use std::path::PathBuf;
 
 use crate::job::Job;
 
@@ -773,7 +774,7 @@ fn open_agent_patch(cx: &mut compositor::Context) -> anyhow::Result<()> {
     };
     if !is_unified_diff(&patch) {
         cx.editor
-            .set_error("Latest agent response is not an applyable patch");
+            .set_error("Latest agent response is not an applicable patch");
         return Ok(());
     }
 
@@ -787,14 +788,17 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
     };
     if !is_unified_diff(&patch) {
         cx.editor
-            .set_error("Latest agent response is not an applyable patch");
+            .set_error("Latest agent response is not an applicable patch");
         return;
     }
+    let apply_cwd =
+        PathBuf::from(crate::agent::context::current_snapshot(cx.editor).workspace_root);
 
     cx.jobs.callback(async move {
         Ok(job::Callback::EditorCompositor(Box::new(
             move |_editor, compositor| {
                 let patch = patch.clone();
+                let apply_cwd = apply_cwd.clone();
                 let prompt = ui::Prompt::new(
                     "apply latest agent patch? [y/N] ".into(),
                     None,
@@ -807,9 +811,10 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
                         match input.trim().to_ascii_lowercase().as_str() {
                             "y" | "yes" => {
                                 let patch = patch.clone();
+                                let apply_cwd = apply_cwd.clone();
                                 cx.editor.set_status("Applying agent patch...");
                                 cx.jobs.callback(async move {
-                                    apply_agent_patch_with_git(patch).await?;
+                                    apply_agent_patch_with_git(patch, apply_cwd).await?;
                                     Ok(job::Callback::Editor(Box::new(|editor| {
                                         let (reloaded, skipped) =
                                             reload_unmodified_file_documents(editor);
@@ -835,26 +840,36 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
     });
 }
 
-async fn apply_agent_patch_with_git(patch: String) -> anyhow::Result<()> {
+async fn apply_agent_patch_with_git(patch: String, cwd: PathBuf) -> anyhow::Result<()> {
+    run_git_apply(&patch, &cwd, true).await?;
+    run_git_apply(&patch, &cwd, false).await
+}
+
+async fn run_git_apply(patch: &str, cwd: &PathBuf, check: bool) -> anyhow::Result<()> {
     use std::process::Stdio;
     use tokio::io::AsyncWriteExt;
     use tokio::process::Command;
 
-    let mut child = Command::new("git")
+    let mut command = Command::new("git");
+    command
+        .current_dir(cwd)
         .arg("apply")
-        .arg("--whitespace=nowarn")
+        .arg("--whitespace=nowarn");
+    if check {
+        command.arg("--check");
+    }
+    let mut child = command
         .arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
 
-    child
-        .stdin
-        .take()
-        .expect("git apply stdin is piped")
-        .write_all(patch.as_bytes())
+    let mut stdin = child.stdin.take().expect("git apply stdin is piped");
+    stdin
+        .write_all(format!("{}\n", patch.trim_end()).as_bytes())
         .await?;
+    drop(stdin);
 
     let output = child.wait_with_output().await?;
     if output.status.success() {
@@ -862,7 +877,12 @@ async fn apply_agent_patch_with_git(patch: String) -> anyhow::Result<()> {
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    anyhow::bail!("git apply failed: {}", stderr.trim());
+    let mode = if check { "check" } else { "apply" };
+    anyhow::bail!(
+        "git apply {mode} failed in {}: {}",
+        cwd.display(),
+        stderr.trim()
+    );
 }
 
 fn reload_unmodified_file_documents(editor: &mut Editor) -> (usize, usize) {
@@ -1268,7 +1288,7 @@ fn extract_agent_patch(response: &str) -> Option<String> {
             }
 
             in_fence = true;
-            fence_is_diff = matches!(info.trim(), "diff" | "patch");
+            fence_is_diff = matches!(info.split_whitespace().next(), Some("diff" | "patch"));
             continue;
         }
 
@@ -1286,7 +1306,25 @@ fn normalize_agent_patch(response: &str) -> Option<String> {
     let start = lines
         .iter()
         .position(|line| is_diff_start_line(line.trim_start()))?;
-    let patch = lines[start..].join("\n");
+    let mut patch_lines = Vec::new();
+    let mut saw_hunk = false;
+
+    for line in &lines[start..] {
+        if is_patch_header_line(line.trim_start()) {
+            saw_hunk |= line.trim_start().starts_with("@@ ");
+            patch_lines.push(*line);
+            continue;
+        }
+
+        if saw_hunk && is_hunk_body_line(line) {
+            patch_lines.push(*line);
+            continue;
+        }
+
+        break;
+    }
+
+    let patch = patch_lines.join("\n");
     if is_unified_diff(&patch) {
         Some(patch.trim().to_string())
     } else {
@@ -1296,6 +1334,30 @@ fn normalize_agent_patch(response: &str) -> Option<String> {
 
 fn is_diff_start_line(line: &str) -> bool {
     line.starts_with("diff --git ") || line.starts_with("--- ")
+}
+
+fn is_patch_header_line(line: &str) -> bool {
+    is_diff_start_line(line)
+        || line.starts_with("index ")
+        || line.starts_with("new file mode ")
+        || line.starts_with("deleted file mode ")
+        || line.starts_with("old mode ")
+        || line.starts_with("new mode ")
+        || line.starts_with("similarity index ")
+        || line.starts_with("dissimilarity index ")
+        || line.starts_with("rename from ")
+        || line.starts_with("rename to ")
+        || line.starts_with("copy from ")
+        || line.starts_with("copy to ")
+        || line.starts_with("+++ ")
+        || line.starts_with("@@ ")
+}
+
+fn is_hunk_body_line(line: &str) -> bool {
+    line.starts_with(' ')
+        || line.starts_with('+')
+        || line.starts_with('-')
+        || line.starts_with('\\')
 }
 
 fn is_unified_diff(patch: &str) -> bool {
