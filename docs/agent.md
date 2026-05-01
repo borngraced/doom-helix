@@ -59,6 +59,28 @@ The snapshot currently includes:
 - Git branch and changed files
 - recent `:` commands
 
+## Planned Configuration
+
+The fork includes an internal config model for the future `[editor.agent]` table:
+
+```toml
+[editor.agent]
+enable = true
+default-agent = "codex"
+auto-context-on-open = true
+include-theme = true
+include-command-history = true
+include-visible-buffer = true
+include-diagnostics = true
+require-approval-for-shell = true
+
+[editor.agent.servers.codex]
+command = "codex"
+args = ["acp"]
+```
+
+This is not wired into Helix's loaded editor config yet. It is the shape the process-spawning layer will use.
+
 ## Near-Term Direction
 
 The next implementation steps are:
