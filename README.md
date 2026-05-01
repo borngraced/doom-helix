@@ -5,11 +5,7 @@ DoomHelix is an agentic modal code editor based on
 tree-sitter highlighting, LSP support, selections, splits, and command model,
 then adds an editor-native agent workflow for real coding work.
 
-The binary is:
-
-```sh
-dhx
-```
+The editor command is `dhx`.
 
 ## Why DoomHelix
 
