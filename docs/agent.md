@@ -129,7 +129,9 @@ For Codex, build the experimental adapter first:
 cargo build -p helix-codex-agent
 ```
 
-Then configure Helix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to Helix and forwards prompt turns to `codex exec --skip-git-repo-check` with the current Helix context included in stdin. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
+Then configure Helix to launch `target/debug/helix-codex-agent`. The adapter speaks ACP to Helix and forwards prompt turns to `codex exec --skip-git-repo-check --sandbox read-only --ask-for-approval never` with the current Helix context included in stdin. Set `HELIX_CODEX_COMMAND` if the Codex executable is not named `codex`.
+
+The adapter is intentionally read-only for now. It should return explanations or proposed patches, not write files directly. Helix-side write approval prompts will require a later edit/apply workflow where Codex proposes a patch and Helix previews it before applying.
 
 ## Near-Term Direction
 
