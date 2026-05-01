@@ -42,6 +42,15 @@ impl AgentProcess {
         })
     }
 
+    pub async fn spawn_and_handshake(
+        config: &AgentLaunchConfig,
+        editor: &helix_view::Editor,
+    ) -> anyhow::Result<Self> {
+        let mut process = Self::spawn(config).await?;
+        process.send_session_handshake(editor).await?;
+        Ok(process)
+    }
+
     pub async fn send<T: Serialize>(&mut self, message: &T) -> anyhow::Result<()> {
         let frame = encode_content_length_message(message)?;
         self.stdin.write_all(&frame).await?;
