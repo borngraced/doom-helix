@@ -54,6 +54,7 @@ struct AgentMarkdownRenderCache {
     doc_id: DocumentId,
     version: i32,
     text: Text<'static>,
+    rendered_scroll_anchor: Option<(usize, u16)>,
 }
 
 fn markdown_text_into_static(text: Text<'_>) -> Text<'static> {
@@ -71,6 +72,25 @@ fn markdown_text_into_static(text: Text<'_>) -> Text<'static> {
             })
             .collect(),
     }
+}
+
+fn rendered_agent_markdown_scroll(
+    cache: &mut AgentMarkdownRenderCache,
+    doc: &Document,
+    anchor: usize,
+    editor: &Editor,
+) -> u16 {
+    if let Some((cached_anchor, scroll)) = cache.rendered_scroll_anchor {
+        if cached_anchor == anchor {
+            return scroll;
+        }
+    }
+
+    let prefix = doc.text().slice(..anchor).to_string();
+    let markdown = crate::ui::Markdown::new(prefix, editor.syn_loader.clone());
+    let scroll = markdown.parse(None).lines.len().min(u16::MAX as usize) as u16;
+    cache.rendered_scroll_anchor = Some((anchor, scroll));
+    scroll
 }
 
 #[derive(Debug, Clone)]
@@ -322,13 +342,17 @@ impl EditorView {
                 doc_id: doc.id(),
                 version: doc.version(),
                 text,
+                rendered_scroll_anchor: None,
             });
         }
+        let anchor = doc.view_offset(view.id).anchor.min(doc.text().len_chars());
+        let scroll = rendered_agent_markdown_scroll(
+            cache.as_mut().expect("agent markdown cache populated"),
+            doc,
+            anchor,
+            editor,
+        );
         let text = &cache.as_ref().expect("agent markdown cache populated").text;
-        let scroll = doc
-            .text()
-            .char_to_line(doc.view_offset(view.id).anchor)
-            .min(u16::MAX as usize) as u16;
         let paragraph = Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0));
