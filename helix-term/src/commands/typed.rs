@@ -780,7 +780,7 @@ fn open_agent_patch(cx: &mut compositor::Context) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    open_agent_scratch_editor(cx.editor, patch, "diff", "[agent patch]")
+    open_agent_named_scratch_editor(cx.editor, patch, "diff", "[agent patch]", true)
 }
 
 fn apply_agent_patch(cx: &mut compositor::Context) {
@@ -1385,18 +1385,60 @@ fn open_agent_scratch_editor(
     language_id: &str,
     display_name: &str,
 ) -> anyhow::Result<()> {
+    open_agent_named_scratch_editor(editor, contents, language_id, display_name, false)
+}
+
+fn open_agent_named_scratch_editor(
+    editor: &mut Editor,
+    contents: String,
+    language_id: &str,
+    display_name: &str,
+    reuse_existing: bool,
+) -> anyhow::Result<()> {
+    if reuse_existing {
+        if let Some(doc_id) = agent_named_scratch_doc_id(editor, display_name) {
+            editor.switch(doc_id, Action::Replace);
+            let view_id = view!(editor).id;
+            replace_agent_scratch_contents(editor, doc_id, view_id, contents, language_id);
+            return Ok(());
+        }
+    }
+
     let doc_id = editor.new_file(Action::HorizontalSplit);
     let view_id = view!(editor).id;
+    doc_mut!(editor, &doc_id).set_display_name(display_name);
+    replace_agent_scratch_contents(editor, doc_id, view_id, contents, language_id);
+
+    Ok(())
+}
+
+fn replace_agent_scratch_contents(
+    editor: &mut Editor,
+    doc_id: helix_view::DocumentId,
+    view_id: helix_view::ViewId,
+    contents: String,
+    language_id: &str,
+) {
     let loader = editor.syn_loader.load();
     let doc = doc_mut!(editor, &doc_id);
-    doc.set_display_name(display_name);
     doc.ensure_view_init(view_id);
+    let delete = Transaction::delete(doc.text(), [(0, doc.text().len_chars())].into_iter());
+    doc.apply(&delete, view_id);
     let selection = Selection::point(0);
     let transaction = Transaction::insert(doc.text(), &selection, contents.into());
     doc.apply(&transaction, view_id);
+    doc.set_selection(view_id, Selection::point(0));
     doc.set_language_by_language_id(language_id, &loader).ok();
+}
 
-    Ok(())
+fn agent_named_scratch_doc_id(
+    editor: &Editor,
+    display_name: &str,
+) -> Option<helix_view::DocumentId> {
+    editor
+        .documents()
+        .find(|doc| doc.path().is_none() && doc.display_name() == display_name)
+        .map(|doc| doc.id())
 }
 
 fn agent_turn_response_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyhow::Result<String> {
