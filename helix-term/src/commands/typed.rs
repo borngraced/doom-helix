@@ -780,7 +780,7 @@ fn open_agent_patch(cx: &mut compositor::Context) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    open_agent_scratch_editor(cx.editor, patch, "diff")
+    open_agent_scratch_editor(cx.editor, patch, "diff", "[agent patch]")
 }
 
 fn apply_agent_patch(cx: &mut compositor::Context) {
@@ -826,6 +826,7 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
                                     Ok(job::Callback::Editor(Box::new(move |editor| {
                                         match result {
                                             Ok(()) => {
+                                                close_agent_patch_buffers(editor);
                                                 let (reloaded, skipped) =
                                                     reload_unmodified_file_documents(editor);
                                                 if skipped == 0 {
@@ -849,6 +850,7 @@ fn apply_agent_patch(cx: &mut compositor::Context) {
                                                     editor,
                                                     diagnostics,
                                                     "markdown",
+                                                    "[agent apply diagnostics]",
                                                 ) {
                                                     editor.set_error(format!(
                                                         "Agent patch apply failed: {error}; also failed to open diagnostics: {open_error}"
@@ -1081,6 +1083,18 @@ fn reload_unmodified_file_documents(editor: &mut Editor) -> (usize, usize) {
     (reloaded, skipped)
 }
 
+fn close_agent_patch_buffers(editor: &mut Editor) {
+    let patch_doc_ids = editor
+        .documents()
+        .filter(|doc| doc.path().is_none() && doc.display_name() == "[agent patch]")
+        .map(|doc| doc.id())
+        .collect::<Vec<_>>();
+
+    for doc_id in patch_doc_ids {
+        let _ = editor.close_document(doc_id, true);
+    }
+}
+
 fn agent_panel_action(position: AgentPanelPosition) -> Action {
     match position {
         AgentPanelPosition::Left | AgentPanelPosition::Right => Action::VerticalSplit,
@@ -1184,7 +1198,7 @@ fn open_agent_json_scratch(cx: &mut compositor::Context, contents: String) -> an
 }
 
 fn open_agent_json_scratch_editor(editor: &mut Editor, contents: String) -> anyhow::Result<()> {
-    open_agent_scratch_editor(editor, contents, "json")
+    open_agent_scratch_editor(editor, contents, "json", "[agent json]")
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1369,11 +1383,13 @@ fn open_agent_scratch_editor(
     editor: &mut Editor,
     contents: String,
     language_id: &str,
+    display_name: &str,
 ) -> anyhow::Result<()> {
     let doc_id = editor.new_file(Action::HorizontalSplit);
     let view_id = view!(editor).id;
     let loader = editor.syn_loader.load();
     let doc = doc_mut!(editor, &doc_id);
+    doc.set_display_name(display_name);
     doc.ensure_view_init(view_id);
     let selection = Selection::point(0);
     let transaction = Transaction::insert(doc.text(), &selection, contents.into());
