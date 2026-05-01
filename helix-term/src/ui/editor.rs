@@ -29,11 +29,14 @@ use helix_view::{
     graphics::{Color, CursorKind, Modifier, Rect, Style},
     input::{KeyEvent, MouseButton, MouseEvent, MouseEventKind},
     keyboard::{KeyCode, KeyModifiers},
-    Document, Editor, Theme, View,
+    Document, DocumentId, Editor, Theme, View,
 };
-use std::{mem::take, num::NonZeroUsize, ops, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, mem::take, num::NonZeroUsize, ops, path::PathBuf, rc::Rc};
 
-use tui::{buffer::Buffer as Surface, text::Span};
+use tui::{
+    buffer::Buffer as Surface,
+    text::{Span, Spans, Text},
+};
 
 pub struct EditorView {
     pub keymaps: Keymaps,
@@ -42,8 +45,32 @@ pub struct EditorView {
     pub(crate) last_insert: (commands::MappableCommand, Vec<InsertEvent>),
     pub(crate) completion: Option<Completion>,
     spinners: ProgressSpinners,
+    agent_markdown_cache: RefCell<Option<AgentMarkdownRenderCache>>,
     /// Tracks if the terminal window is focused by reaction to terminal focus events
     terminal_focused: bool,
+}
+
+struct AgentMarkdownRenderCache {
+    doc_id: DocumentId,
+    version: i32,
+    text: Text<'static>,
+}
+
+fn markdown_text_into_static(text: Text<'_>) -> Text<'static> {
+    Text {
+        lines: text
+            .lines
+            .into_iter()
+            .map(|line| {
+                Spans(
+                    line.0
+                        .into_iter()
+                        .map(|span| Span::styled(span.content.into_owned(), span.style))
+                        .collect(),
+                )
+            })
+            .collect(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +93,7 @@ impl EditorView {
             last_insert: (commands::MappableCommand::normal_mode, Vec::new()),
             completion: None,
             spinners: ProgressSpinners::default(),
+            agent_markdown_cache: RefCell::new(None),
             terminal_focused: true,
         }
     }
@@ -91,7 +119,7 @@ impl EditorView {
         let view_offset = doc.view_offset(view.id);
 
         if Self::is_agent_transcript_doc(doc) {
-            Self::render_agent_transcript_markdown(editor, doc, view, surface);
+            self.render_agent_transcript_markdown(editor, doc, view, surface);
             self.render_view_border_and_statusline(
                 editor, doc, view, viewport, surface, is_focused,
             );
@@ -269,6 +297,7 @@ impl EditorView {
     }
 
     fn render_agent_transcript_markdown(
+        &self,
         editor: &Editor,
         doc: &Document,
         view: &View,
@@ -281,14 +310,26 @@ impl EditorView {
             return;
         }
 
-        let contents = doc.text().to_string();
-        let markdown = super::Markdown::new(contents, editor.syn_loader.clone());
-        let text = markdown.parse(Some(&editor.theme));
+        let mut cache = self.agent_markdown_cache.borrow_mut();
+        let cache_is_current = cache
+            .as_ref()
+            .is_some_and(|cache| cache.doc_id == doc.id() && cache.version == doc.version());
+        if !cache_is_current {
+            let contents = doc.text().to_string();
+            let markdown = super::Markdown::new(contents, editor.syn_loader.clone());
+            let text = markdown_text_into_static(markdown.parse(Some(&editor.theme)));
+            *cache = Some(AgentMarkdownRenderCache {
+                doc_id: doc.id(),
+                version: doc.version(),
+                text,
+            });
+        }
+        let text = &cache.as_ref().expect("agent markdown cache populated").text;
         let scroll = doc
             .text()
             .char_to_line(doc.view_offset(view.id).anchor)
             .min(u16::MAX as usize) as u16;
-        let paragraph = Paragraph::new(&text)
+        let paragraph = Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0));
 
