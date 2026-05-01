@@ -142,16 +142,23 @@ pub fn new_session_request(id: u64, session: AgentSession) -> anyhow::Result<Jso
     })
 }
 
+pub fn session_handshake(editor: &helix_view::Editor) -> anyhow::Result<Vec<JsonRpcRequest>> {
+    let session = session::new_session(editor);
+    Ok(vec![
+        initialize_request(1)?,
+        new_session_request(2, session)?,
+    ])
+}
+
 pub fn pretty_json<T: Serialize>(value: &T) -> anyhow::Result<String> {
     Ok(serde_json::to_string_pretty(value)?)
 }
 
 pub fn session_handshake_pretty(editor: &helix_view::Editor) -> anyhow::Result<String> {
-    let session = session::new_session(editor);
-    let messages = [
-        serde_json::to_value(initialize_request(1)?)?,
-        serde_json::to_value(new_session_request(2, session)?)?,
-    ];
+    let messages = session_handshake(editor)?
+        .into_iter()
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>()?;
 
     pretty_json(&messages)
 }

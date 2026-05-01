@@ -26,6 +26,14 @@ Opens a dry-run ACP handshake payload as JSON. The payload currently previews th
 
 Opens the resolved default agent launch config from the active editor config.
 
+`:agent start`
+
+Starts the configured ACP agent process and sends the initial session handshake.
+
+`:agent status`
+
+Reports whether an agent process is currently registered as running.
+
 `:agent-context`
 
 Compatibility command that opens the same context snapshot directly.

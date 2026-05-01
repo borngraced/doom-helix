@@ -596,6 +596,32 @@ fn open_agent_launch_config(cx: &mut compositor::Context) -> anyhow::Result<()> 
     open_agent_json_scratch(cx, serde_json::to_string_pretty(&config)?)
 }
 
+fn start_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
+    let launch_config = cx.editor.config().agent.launch_config()?;
+    let handshake = crate::agent::acp::session_handshake(cx.editor)?;
+    let agent_name = launch_config.name.clone();
+
+    cx.jobs.callback(async move {
+        crate::agent::runtime::start(launch_config, handshake).await?;
+        Ok(job::Callback::Editor(Box::new(move |editor| {
+            editor.set_status(format!("Agent '{agent_name}' started"));
+        })))
+    });
+
+    Ok(())
+}
+
+fn show_agent_status(cx: &mut compositor::Context) {
+    match crate::agent::runtime::status() {
+        crate::agent::runtime::AgentRuntimeStatus::Running { name } => {
+            cx.editor.set_status(format!("Agent '{name}' is running"));
+        }
+        crate::agent::runtime::AgentRuntimeStatus::Stopped => {
+            cx.editor.set_status("No agent is running");
+        }
+    }
+}
+
 fn open_agent_json_scratch(cx: &mut compositor::Context, contents: String) -> anyhow::Result<()> {
     let doc_id = cx.editor.new_file(Action::HorizontalSplit);
     let view_id = view!(cx.editor).id;
@@ -620,6 +646,11 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         Some("new") => open_agent_session(cx),
         Some("acp") => open_agent_acp_handshake(cx),
         Some("launch-config") => open_agent_launch_config(cx),
+        Some("start") => start_agent(cx),
+        Some("status") => {
+            show_agent_status(cx);
+            Ok(())
+        }
         Some("ask") => {
             let prompt = args
                 .get(1)
