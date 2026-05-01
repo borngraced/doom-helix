@@ -59,9 +59,9 @@ The snapshot currently includes:
 - Git branch and changed files
 - recent `:` commands
 
-## Planned Configuration
+## Configuration
 
-The fork includes an internal config model for the future `[editor.agent]` table:
+The fork supports an experimental `[editor.agent]` table:
 
 ```toml
 [editor.agent]
@@ -79,7 +79,7 @@ command = "codex"
 args = ["acp"]
 ```
 
-This is not wired into Helix's loaded editor config yet. It is the shape the process-spawning layer will use.
+The process-spawning layer resolves the configured `default-agent` from this table.
 
 ## Near-Term Direction
 

@@ -432,8 +432,77 @@ pub struct Config {
     /// Whether to enable Kitty Keyboard Protocol
     pub kitty_keyboard_protocol: KittyKeyboardProtocolConfig,
     pub buffer_picker: BufferPickerConfig,
+    pub agent: AgentConfig,
     /// Whether to implicitly trust every workspace or not
     pub insecure: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct AgentConfig {
+    pub enable: bool,
+    pub default_agent: String,
+    pub auto_context_on_open: bool,
+    pub include_theme: bool,
+    pub include_command_history: bool,
+    pub include_visible_buffer: bool,
+    pub include_diagnostics: bool,
+    pub require_approval_for_shell: bool,
+    pub servers: BTreeMap<String, AgentServerConfig>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct AgentServerConfig {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentLaunchConfig {
+    pub name: String,
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+impl AgentConfig {
+    pub fn launch_config(&self) -> anyhow::Result<AgentLaunchConfig> {
+        let server = self.servers.get(&self.default_agent).ok_or_else(|| {
+            anyhow::anyhow!("agent server '{}' is not configured", self.default_agent)
+        })?;
+
+        if server.command.trim().is_empty() {
+            anyhow::bail!("agent server '{}' has an empty command", self.default_agent);
+        }
+
+        Ok(AgentLaunchConfig {
+            name: self.default_agent.clone(),
+            command: server.command.clone(),
+            args: server.args.clone(),
+        })
+    }
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            default_agent: "codex".to_string(),
+            auto_context_on_open: true,
+            include_theme: true,
+            include_command_history: true,
+            include_visible_buffer: true,
+            include_diagnostics: true,
+            require_approval_for_shell: true,
+            servers: BTreeMap::from([(
+                "codex".to_string(),
+                AgentServerConfig {
+                    command: "codex".to_string(),
+                    args: vec!["acp".to_string()],
+                },
+            )]),
+        }
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, Clone, Copy)]
@@ -1156,6 +1225,7 @@ impl Default for Config {
             rainbow_brackets: false,
             kitty_keyboard_protocol: Default::default(),
             buffer_picker: BufferPickerConfig::default(),
+            agent: AgentConfig::default(),
             insecure: false,
         }
     }
@@ -2510,5 +2580,84 @@ impl CursorCache {
 
     pub fn reset(&self) {
         self.0.set(None)
+    }
+}
+
+#[cfg(test)]
+mod agent_config_tests {
+    use super::*;
+
+    #[test]
+    fn parses_agent_config() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            enable = true
+            default-agent = "local"
+
+            [servers.local]
+            command = "agent"
+            args = ["--acp"]
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.enable);
+        assert_eq!(config.default_agent, "local");
+        assert_eq!(config.servers["local"].command, "agent");
+        assert_eq!(config.servers["local"].args, ["--acp"]);
+    }
+
+    #[test]
+    fn parses_editor_agent_config() {
+        let config: Config = toml::from_str(
+            r#"
+            [agent]
+            enable = true
+            default-agent = "local"
+
+            [agent.servers.local]
+            command = "agent"
+            args = ["--acp"]
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.agent.enable);
+        assert_eq!(config.agent.default_agent, "local");
+        assert_eq!(config.agent.servers["local"].command, "agent");
+    }
+
+    #[test]
+    fn resolves_launch_config() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            default-agent = "local"
+
+            [servers.local]
+            command = "agent"
+            args = ["--acp"]
+            "#,
+        )
+        .unwrap();
+
+        let launch = config.launch_config().unwrap();
+        assert_eq!(launch.name, "local");
+        assert_eq!(launch.command, "agent");
+        assert_eq!(launch.args, ["--acp"]);
+    }
+
+    #[test]
+    fn rejects_missing_default_agent() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            default-agent = "missing"
+
+            [servers.local]
+            command = "agent"
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.launch_config().is_err());
     }
 }

@@ -6,7 +6,8 @@ use tokio::{
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
 };
 
-use super::{acp, config::AgentLaunchConfig, session};
+use super::{acp, session};
+use helix_view::editor::AgentLaunchConfig;
 
 pub struct AgentProcess {
     child: Child,
