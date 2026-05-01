@@ -571,6 +571,29 @@ fn new_file(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> an
     Ok(())
 }
 
+fn agent_context(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let snapshot = crate::agent::context::current_snapshot_pretty(cx.editor)?;
+    let doc_id = cx.editor.new_file(Action::HorizontalSplit);
+    let view_id = view!(cx.editor).id;
+    let loader = cx.editor.syn_loader.load();
+    let doc = doc_mut!(cx.editor, &doc_id);
+    doc.ensure_view_init(view_id);
+    let selection = Selection::point(0);
+    let transaction = Transaction::insert(doc.text(), &selection, snapshot.into());
+    doc.apply(&transaction, view_id);
+    doc.set_language_by_language_id("json", &loader).ok();
+
+    Ok(())
+}
+
 fn format(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
     if event != PromptEvent::Validate {
         return Ok(());
@@ -3087,6 +3110,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         aliases: &["n"],
         doc: "Create a new scratch buffer.",
         fun: new_file,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "agent-context",
+        aliases: &[],
+        doc: "Open a scratch buffer with the current agent context snapshot.",
+        fun: agent_context,
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, Some(0)),
