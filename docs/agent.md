@@ -133,6 +133,27 @@ Then configure Helix to launch `target/debug/helix-codex-agent`. The adapter spe
 
 The adapter is intentionally read-only for now. It should return explanations or proposed patches, not write files directly. Helix-side write approval prompts will require a later edit/apply workflow where Codex proposes a patch and Helix previews it before applying.
 
+## Suggested Keymap
+
+Add local bindings for the common agent actions:
+
+```toml
+[keys.normal.space.a]
+c = ":agent chat"
+e = ":agent explain"
+f = ":agent fix"
+r = ":agent refactor"
+s = ":agent status"
+
+[keys.select.space.a]
+c = ":agent chat"
+e = ":agent explain"
+f = ":agent fix"
+r = ":agent refactor"
+```
+
+With this map, select code and press `<space>a e` to explain it, `<space>a f` to ask for a fix proposal, or `<space>a r` to ask for a refactor proposal.
+
 ## Near-Term Direction
 
 The next implementation steps are:
