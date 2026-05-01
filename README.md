@@ -39,7 +39,8 @@ From a remote script:
 curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
 ```
 
-The installer builds from source and installs:
+The installer downloads a prebuilt DoomHelix release when available and falls back
+to building from source. It installs:
 
 - `dhx` to `~/.local/bin/dhx`
 - `dhx-bin` to `~/.local/bin/dhx-bin`
@@ -49,6 +50,7 @@ The installer builds from source and installs:
 
 Override paths with `DOOMHELIX_PREFIX`, `DOOMHELIX_BIN_DIR`, or
 `DOOMHELIX_RUNTIME_DIR`.
+Force a local source build with `DOOMHELIX_BUILD_FROM_SOURCE=1`.
 
 ## Upstream
 

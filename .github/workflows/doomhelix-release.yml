@@ -1,0 +1,55 @@
+name: DoomHelix Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x86_64:
+    name: Linux x86_64
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build DoomHelix
+        run: |
+          HELIX_DISABLE_AUTO_GRAMMAR_BUILD=1 cargo build --release -p helix-term --bin dhx
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          version="${GITHUB_REF_NAME:-dev}"
+          version="${version#v}"
+          target="x86_64-unknown-linux-gnu"
+          package="doom-helix-${version}-${target}"
+          mkdir -p "dist/${package}"
+          cp target/release/dhx "dist/${package}/dhx-bin"
+          cp README.md LICENSE install.sh "dist/${package}/"
+          cp -r runtime "dist/${package}/runtime"
+          tar -C dist -czf "dist/${package}.tar.gz" "${package}"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: doom-helix-linux-x86_64
+          path: dist/*.tar.gz
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/*.tar.gz

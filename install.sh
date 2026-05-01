@@ -3,6 +3,8 @@ set -eu
 
 repo_url=${DOOMHELIX_REPO:-https://github.com/borngraced/doom-helix.git}
 repo_ref=${DOOMHELIX_REF:-main}
+release_repo=${DOOMHELIX_RELEASE_REPO:-borngraced/doom-helix}
+build_from_source=${DOOMHELIX_BUILD_FROM_SOURCE:-0}
 prefix=${DOOMHELIX_PREFIX:-"$HOME/.local"}
 bin_dir=${DOOMHELIX_BIN_DIR:-"$prefix/bin"}
 share_dir=${DOOMHELIX_SHARE_DIR:-"$prefix/share/doomhelix"}
@@ -26,7 +28,6 @@ copy_dir() {
   tar -C "$src" -cf - . | tar -C "$dest" -xf -
 }
 
-need cargo
 need install
 need tar
 
@@ -75,6 +76,58 @@ platform_info() {
   printf '%s %s %s\n' "$arch" "$platform" "$ext"
 }
 
+doomhelix_target() {
+  set -- $(platform_info)
+  arch=$1
+  platform=$2
+
+  case "$platform" in
+    unknown-linux-gnu) printf '%s\n' "${arch}-unknown-linux-gnu" ;;
+    apple-darwin) printf '%s\n' "${arch}-apple-darwin" ;;
+    *)
+      echo "error: unsupported DoomHelix release platform: $platform" >&2
+      exit 1
+      ;;
+  esac
+}
+
+install_prebuilt_doomhelix() {
+  target=$(doomhelix_target)
+  tag=${DOOMHELIX_RELEASE_TAG:-}
+  if [ -z "$tag" ]; then
+    tag=$repo_ref
+  fi
+
+  version=${tag#v}
+  asset="doom-helix-${version}-${target}.tar.gz"
+  if [ "$tag" = latest ]; then
+    url="https://github.com/${release_repo}/releases/latest/download/${asset}"
+  else
+    url="https://github.com/${release_repo}/releases/download/${tag}/${asset}"
+  fi
+  tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/doomhelix-release.XXXXXX")
+
+  echo "Installing DoomHelix prebuilt release ${tag} (${target})..."
+  if ! download "$url" "$tmp_dir/$asset"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  tar -xzf "$tmp_dir/$asset" -C "$tmp_dir"
+  package_dir=$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+  if [ -z "$package_dir" ] || [ ! -f "$package_dir/dhx-bin" ] || [ ! -d "$package_dir/runtime" ]; then
+    rm -rf "$tmp_dir"
+    echo "error: invalid DoomHelix release archive: $asset" >&2
+    exit 1
+  fi
+
+  mkdir -p "$bin_dir" "$share_dir"
+  install -m 755 "$package_dir/dhx-bin" "$bin_dir/dhx-bin"
+  copy_dir "$package_dir/runtime" "$runtime_dir"
+  rm -rf "$tmp_dir"
+  return 0
+}
+
 install_codex_acp() {
   if [ "$install_codex_acp" = 0 ]; then
     return
@@ -121,35 +174,51 @@ install_codex_acp() {
   rm -rf "$tmp_dir"
 }
 
-if [ -n "${DOOMHELIX_SOURCE:-}" ]; then
-  source_dir=$DOOMHELIX_SOURCE
-  cleanup=
-elif [ -f Cargo.toml ] && [ -d helix-term ] && [ -d runtime ]; then
-  source_dir=$(pwd)
-  cleanup=
-else
-  need git
-  tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/doomhelix.XXXXXX")
-  cleanup=$tmp_dir
-  git clone --depth 1 --branch "$repo_ref" "$repo_url" "$tmp_dir"
-  source_dir=$tmp_dir
+installed_prebuilt=0
+cleanup=
+
+if [ "$build_from_source" != 1 ] && [ -z "${DOOMHELIX_SOURCE:-}" ]; then
+  if install_prebuilt_doomhelix; then
+    installed_prebuilt=1
+  else
+    echo "Prebuilt DoomHelix release unavailable; building from source." >&2
+  fi
 fi
 
-cleanup_on_exit() {
-  if [ -n "${cleanup:-}" ]; then
-    rm -rf "$cleanup"
+if [ "$installed_prebuilt" = 0 ]; then
+  need cargo
+
+  if [ -n "${DOOMHELIX_SOURCE:-}" ]; then
+    source_dir=$DOOMHELIX_SOURCE
+    cleanup=
+  elif [ -f Cargo.toml ] && [ -d helix-term ] && [ -d runtime ]; then
+    source_dir=$(pwd)
+    cleanup=
+  else
+    need git
+    tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/doomhelix.XXXXXX")
+    cleanup=$tmp_dir
+    git clone --depth 1 --branch "$repo_ref" "$repo_url" "$tmp_dir"
+    source_dir=$tmp_dir
   fi
-}
-trap cleanup_on_exit EXIT INT TERM
 
-cd "$source_dir"
+  cleanup_on_exit() {
+    if [ -n "${cleanup:-}" ]; then
+      rm -rf "$cleanup"
+    fi
+  }
+  trap cleanup_on_exit EXIT INT TERM
 
-cargo build --release -p helix-term --bin dhx
+  cd "$source_dir"
 
-mkdir -p "$bin_dir" "$share_dir"
-install -m 755 target/release/dhx "$bin_dir/dhx-bin"
+  cargo build --release -p helix-term --bin dhx
+
+  mkdir -p "$bin_dir" "$share_dir"
+  install -m 755 target/release/dhx "$bin_dir/dhx-bin"
+  copy_dir runtime "$runtime_dir"
+fi
+
 install_codex_acp
-copy_dir runtime "$runtime_dir"
 cat >"$bin_dir/dhx" <<EOF
 #!/bin/sh
 HELIX_RUNTIME=${runtime_dir} exec ${bin_dir}/dhx-bin "\$@"
