@@ -30,6 +30,7 @@ const AGENT_SUBCOMMANDS: &[&str] = &[
     "explain",
     "fix",
     "refactor",
+    "restore",
     "next",
     "new",
     "acp",
@@ -771,7 +772,7 @@ fn edit_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
     )
 }
 
-fn open_agent_panel(cx: &mut compositor::Context) {
+fn open_agent_panel(cx: &mut compositor::Context, status: &'static str) {
     let position = cx.editor.config().agent.panel_position;
     let action = agent_panel_action(position);
     let (doc_id, created) = agent_transcript_doc_id(cx.editor, action);
@@ -780,7 +781,7 @@ fn open_agent_panel(cx: &mut compositor::Context) {
         place_agent_panel(cx.editor, position);
     }
     render_agent_transcript_editor(cx.editor, doc_id, view_id);
-    cx.editor.set_status("Agent panel focused");
+    cx.editor.set_status(status);
 }
 
 fn clear_agent_panel(cx: &mut compositor::Context) {
@@ -1915,7 +1916,11 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
             Ok(())
         }
         Some("panel") => {
-            open_agent_panel(cx);
+            open_agent_panel(cx, "Agent panel focused");
+            Ok(())
+        }
+        Some("restore") => {
+            open_agent_panel(cx, "Agent panel restored");
             Ok(())
         }
         Some("next") => {

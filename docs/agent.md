@@ -88,6 +88,10 @@ Prompts for confirmation, then applies the latest stored agent patch with `git a
 Opens or focuses the agent transcript buffer. The split direction follows `[editor.agent].panel-position`.
 There is one agent transcript per running agent runtime; new chat/action turns append to that transcript.
 
+`:agent restore`
+
+Restores the single agent transcript panel from the saved transcript state if the split was closed. This does not restart the agent or create a new conversation.
+
 `:agent next`
 
 Moves the cursor to the next turn in the agent transcript.
@@ -177,6 +181,7 @@ E = ":agent edit"
 a = ":agent apply"
 p = ":agent patch"
 P = ":agent panel"
+R = ":agent restore"
 s = ":agent start"
 x = ":agent clear"
 S = ":agent status"
