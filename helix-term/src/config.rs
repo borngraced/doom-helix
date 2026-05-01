@@ -330,11 +330,13 @@ mod tests {
 
     #[test]
     fn agent_toml_merges_over_existing_agent_config() {
-        let mut base_agent = AgentConfig::default();
-        base_agent.enable = true;
-        base_agent.name = "codex".to_string();
-        base_agent.command = "codex-acp".to_string();
-        base_agent.panel_size = 30;
+        let base_agent = AgentConfig {
+            enable: true,
+            name: "codex".to_string(),
+            command: "codex-acp".to_string(),
+            panel_size: 30,
+            ..AgentConfig::default()
+        };
 
         let base = agent_config_value(&base_agent).unwrap();
         let agent = load_agent_config(
