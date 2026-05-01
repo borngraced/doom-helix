@@ -581,6 +581,14 @@ fn open_agent_request(cx: &mut compositor::Context, prompt: &str) -> anyhow::Res
     open_agent_json_scratch(cx, request)
 }
 
+fn open_agent_session(cx: &mut compositor::Context) -> anyhow::Result<()> {
+    open_agent_json_scratch(
+        cx,
+        "{\n  \"schema_version\": 1,\n  \"kind\": \"session\",\n  \"status\": \"not_started\"\n}\n"
+            .to_string(),
+    )
+}
+
 fn open_agent_json_scratch(cx: &mut compositor::Context, contents: String) -> anyhow::Result<()> {
     let doc_id = cx.editor.new_file(Action::HorizontalSplit);
     let view_id = view!(cx.editor).id;
@@ -602,6 +610,7 @@ fn agent(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
 
     match args.first() {
         None | Some("context") => open_agent_context(cx),
+        Some("new") => open_agent_session(cx),
         Some("ask") => {
             let prompt = args
                 .get(1)
@@ -624,6 +633,14 @@ fn agent_context(
     }
 
     open_agent_context(cx)
+}
+
+fn agent_new(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    open_agent_session(cx)
 }
 
 fn format(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
@@ -3168,6 +3185,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         signature: Signature {
             positionals: (0, None),
             raw_after: Some(1),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "agent-new",
+        aliases: &[],
+        doc: "Open a new agent session scratch buffer.",
+        fun: agent_new,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
             ..Signature::DEFAULT
         },
     },

@@ -14,9 +14,17 @@ Opens a scratch buffer containing the current agent context snapshot as JSON.
 
 Same as `:agent`. This exists as the explicit subcommand form.
 
+`:agent new`
+
+Opens a placeholder agent session scratch buffer.
+
 `:agent-context`
 
 Compatibility command that opens the same context snapshot directly.
+
+`:agent-new`
+
+Compatibility command that opens the same placeholder session buffer directly.
 
 `:agent ask <prompt>`
 
