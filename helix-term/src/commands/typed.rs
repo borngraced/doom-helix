@@ -719,7 +719,12 @@ fn chat_agent(cx: &mut compositor::Context) {
                             return;
                         }
 
-                        if let Err(err) = prompt_agent_turn(cx, input.to_string(), false) {
+                        if let Err(err) = prompt_agent_turn(
+                            cx,
+                            input.to_string(),
+                            crate::agent::runtime::AgentTranscriptKind::Chat,
+                            false,
+                        ) {
                             cx.editor.set_error(err.to_string());
                         }
                     },
@@ -732,7 +737,12 @@ fn chat_agent(cx: &mut compositor::Context) {
 }
 
 fn explain_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
-    prompt_agent_turn(cx, "Explain this selected code.".to_string(), false)
+    prompt_agent_turn(
+        cx,
+        "Explain this selected code.".to_string(),
+        crate::agent::runtime::AgentTranscriptKind::Explain,
+        false,
+    )
 }
 
 fn fix_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
@@ -740,6 +750,7 @@ fn fix_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
         cx,
         "Find the bug or problem in this selected code and propose a fix. Do not edit files yet."
             .to_string(),
+        crate::agent::runtime::AgentTranscriptKind::Fix,
         false,
     )
 }
@@ -748,6 +759,7 @@ fn refactor_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
     prompt_agent_turn(
         cx,
         "Suggest a clean refactor for this selected code. Do not edit files yet.".to_string(),
+        crate::agent::runtime::AgentTranscriptKind::Refactor,
         false,
     )
 }
@@ -757,6 +769,7 @@ fn edit_agent(cx: &mut compositor::Context) -> anyhow::Result<()> {
         cx,
         "Propose an edit for this selected code. Return a git-apply compatible unified diff patch only, with file paths and enough surrounding context. Do not modify files."
             .to_string(),
+        crate::agent::runtime::AgentTranscriptKind::Edit,
         true,
     )
 }
@@ -1146,15 +1159,43 @@ fn place_agent_panel(editor: &mut Editor, position: AgentPanelPosition) {
     }
 }
 
+fn agent_prompt_with_formatting(
+    kind: crate::agent::runtime::AgentTranscriptKind,
+    prompt: &str,
+    language_id: Option<&str>,
+) -> String {
+    let language = language_id.unwrap_or("text");
+    let format_rules = match kind {
+        crate::agent::runtime::AgentTranscriptKind::Edit => {
+            "Formatting rules:\n- Return only a git-apply compatible unified diff.\n- Do not wrap the diff in prose unless explicitly asked.\n- Use file paths that are relative to the workspace root."
+        }
+        crate::agent::runtime::AgentTranscriptKind::Explain => {
+            "Formatting rules:\n- Use concise prose.\n- When referencing code, use fenced code blocks with the language id.\n- Prefer short snippets over repeating the whole selection."
+        }
+        crate::agent::runtime::AgentTranscriptKind::Fix
+        | crate::agent::runtime::AgentTranscriptKind::Refactor => {
+            "Formatting rules:\n- Explain the issue or refactor briefly.\n- Put code examples in fenced code blocks with the language id.\n- If proposing a concrete edit, use a fenced diff block."
+        }
+        crate::agent::runtime::AgentTranscriptKind::Chat => {
+            "Formatting rules:\n- Use markdown.\n- Put code in fenced code blocks with the language id when applicable."
+        }
+    };
+
+    format!("{prompt}\n\n{format_rules}\n- Current language id: `{language}`.")
+}
+
 fn prompt_agent_turn(
     cx: &mut compositor::Context,
     prompt: String,
+    kind: crate::agent::runtime::AgentTranscriptKind,
     store_patch: bool,
 ) -> anyhow::Result<()> {
-    let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
     let launch_config = cx.editor.config().agent.launch_config()?;
     let handshake = crate::agent::acp::session_handshake(cx.editor)?;
     let snapshot = crate::agent::context::current_snapshot(cx.editor);
+    let prompt =
+        agent_prompt_with_formatting(kind, &prompt, snapshot.active_file.language_id.as_deref());
+    let prompt = crate::agent::context::prompt_with_primary_selection(cx.editor, &prompt);
     let patch_cwd = snapshot.workspace_root.clone();
     let patch_source_path = snapshot.active_file.path.clone();
     let cancel_generation = crate::agent::runtime::cancel_generation();
@@ -1168,7 +1209,7 @@ fn prompt_agent_turn(
         close_agent_patch_buffers(cx.editor);
     }
     cx.editor.set_status("Agent is thinking...");
-    let pending_range = append_agent_pending_transcript_editor(cx.editor, &prompt)?;
+    let pending_range = append_agent_pending_transcript_editor(cx.editor, kind, &prompt)?;
 
     cx.jobs.callback(async move {
         let result = async {
@@ -1285,6 +1326,7 @@ struct AgentPendingTurn {
 
 fn append_agent_pending_transcript_editor(
     editor: &mut Editor,
+    kind: crate::agent::runtime::AgentTranscriptKind,
     prompt: &str,
 ) -> anyhow::Result<AgentPendingTurn> {
     let position = editor.config().agent.panel_position;
@@ -1295,7 +1337,7 @@ fn append_agent_pending_transcript_editor(
         place_agent_panel(editor, position);
     }
     let pending_id = AGENT_PENDING_TURN_ID.fetch_add(1, Ordering::Relaxed);
-    crate::agent::runtime::append_transcript_turn(pending_id, prompt.trim().to_string());
+    crate::agent::runtime::append_transcript_turn(pending_id, kind, prompt.trim().to_string());
     render_agent_transcript_editor(editor, doc_id, view_id);
 
     Ok(AgentPendingTurn {

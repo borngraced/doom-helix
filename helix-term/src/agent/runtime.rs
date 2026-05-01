@@ -252,9 +252,31 @@ pub struct AgentPatchProposal {
 #[derive(Clone, Debug)]
 pub struct AgentTranscriptTurn {
     pub id: u64,
+    pub kind: AgentTranscriptKind,
     pub prompt: String,
     pub response: Option<String>,
     pub status: AgentTranscriptStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentTranscriptKind {
+    Chat,
+    Explain,
+    Fix,
+    Refactor,
+    Edit,
+}
+
+impl AgentTranscriptKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Explain => "explain",
+            Self::Fix => "fix",
+            Self::Refactor => "refactor",
+            Self::Edit => "edit",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -265,12 +287,13 @@ pub enum AgentTranscriptStatus {
     Failed,
 }
 
-pub fn append_transcript_turn(id: u64, prompt: String) {
+pub fn append_transcript_turn(id: u64, kind: AgentTranscriptKind, prompt: String) {
     AGENT_TRANSCRIPT_TURNS
         .lock()
         .expect("agent transcript turns lock poisoned")
         .push(AgentTranscriptTurn {
             id,
+            kind,
             prompt,
             response: None,
             status: AgentTranscriptStatus::Pending,
@@ -317,8 +340,17 @@ pub fn render_transcript() -> String {
             rendered.push_str("\n\n---\n\n");
         }
 
-        rendered.push_str(&format!("**You:**\n\n{}\n\n", turn.prompt.trim()));
-        rendered.push_str("**Codex:**\n\n");
+        rendered.push_str(&format!(
+            "**You [{} #{}]:**\n\n{}\n\n",
+            turn.kind.label(),
+            turn.id,
+            turn.prompt.trim()
+        ));
+        rendered.push_str(&format!(
+            "**Codex [{} #{}]:**\n\n",
+            turn.kind.label(),
+            turn.id
+        ));
         match turn.status {
             AgentTranscriptStatus::Pending => {
                 rendered.push_str(&format!("Working... [turn {}]", turn.id));
