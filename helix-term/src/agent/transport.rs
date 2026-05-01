@@ -1,7 +1,8 @@
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::process::Stdio;
 use tokio::{
-    io::{AsyncWriteExt, BufReader, BufWriter},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
 };
 
@@ -58,6 +59,10 @@ impl AgentProcess {
         Ok(())
     }
 
+    pub async fn recv<T: DeserializeOwned>(&mut self) -> anyhow::Result<T> {
+        read_content_length_message(&mut self.stdout).await
+    }
+
     pub fn stdout(&mut self) -> &mut BufReader<ChildStdout> {
         &mut self.stdout
     }
@@ -85,9 +90,42 @@ pub fn encode_json_content_length_message(body: &str) -> Vec<u8> {
     message
 }
 
+pub async fn read_content_length_message<T: DeserializeOwned>(
+    reader: &mut (impl AsyncBufRead + Unpin),
+) -> anyhow::Result<T> {
+    let mut buffer = String::new();
+    let mut content_length = None;
+
+    loop {
+        buffer.clear();
+        if reader.read_line(&mut buffer).await? == 0 {
+            anyhow::bail!("agent stream closed while reading message header");
+        }
+
+        if buffer == "\r\n" {
+            break;
+        }
+
+        let Some((name, value)) = buffer.trim().split_once(": ") else {
+            continue;
+        };
+
+        if name.eq_ignore_ascii_case("Content-Length") {
+            content_length = Some(value.parse::<usize>()?);
+        }
+    }
+
+    let content_length =
+        content_length.ok_or_else(|| anyhow::anyhow!("agent message is missing Content-Length"))?;
+    let mut content = vec![0; content_length];
+    reader.read_exact(&mut content).await?;
+    Ok(serde_json::from_slice(&content)?)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use tokio::io::{duplex, AsyncWriteExt};
 
     use super::*;
 
@@ -112,5 +150,17 @@ mod tests {
         let message = String::from_utf8(message).unwrap();
         assert!(message.starts_with("Content-Length: "));
         assert!(message.ends_with(r#""method":"initialize"}"#));
+    }
+
+    #[tokio::test]
+    async fn reads_content_length_frame() {
+        let (mut writer, reader) = duplex(128);
+        let frame = encode_json_content_length_message(r#"{"ok":true}"#);
+        writer.write_all(&frame).await.unwrap();
+        drop(writer);
+
+        let mut reader = tokio::io::BufReader::new(reader);
+        let message: serde_json::Value = read_content_length_message(&mut reader).await.unwrap();
+        assert_eq!(message, json!({ "ok": true }));
     }
 }
