@@ -34,7 +34,7 @@ attached automatically.
 - Markdown transcript with selectable/copyable text and code fences.
 - `gd` on transcript file links jumps back into the referenced source file.
 - Agent transcript restore within the running editor session.
-- Separate DoomHelix config path: `~/.config/doomhelix/config.toml`.
+- Reuses Helix config paths and keeps agent settings in `~/.config/helix/agent.toml`.
 
 ## Agent Workflow
 
@@ -88,11 +88,12 @@ The installer places:
 - `dhx` to `~/.local/bin/dhx`
 - `dhx-bin` to `~/.local/bin/dhx-bin`
 - selected ACP adapter binaries when requested
-- runtime files to `~/.local/share/doomhelix/runtime`
-- starter config at `~/.config/doomhelix/config.toml` if one does not already exist
+- runtime files to `~/.local/share/helix/runtime`
+- starter agent config at `~/.config/helix/agent.toml` if one does not already exist
 
-Override paths with `DOOMHELIX_PREFIX`, `DOOMHELIX_BIN_DIR`, or
-`DOOMHELIX_RUNTIME_DIR`.
+Override install paths with `DOOMHELIX_PREFIX`, `DOOMHELIX_BIN_DIR`, or
+`DOOMHELIX_RUNTIME_DIR`. Override the agent config destination with
+`DOOMHELIX_CONFIG_DIR` or `DOOMHELIX_AGENT_CONFIG_FILE`.
 
 Force a local source build:
 
@@ -106,10 +107,9 @@ Install only the editor:
 DOOMHELIX_AGENT=none sh install.sh
 ```
 
-## Minimal Config
+## Minimal Agent Config
 
 ```toml
-[editor.agent]
 enable = true
 name = "codex"
 command = "codex-acp"
@@ -117,6 +117,9 @@ args = []
 panel-position = "right"
 panel-size = 30
 ```
+
+Put this in `~/.config/helix/agent.toml`. Keep theme, editor settings, and
+keymaps in Helix's normal `config.toml`.
 
 ## Agent Backend
 

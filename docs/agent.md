@@ -217,16 +217,31 @@ interactive approval because it is process-oriented rather than session-oriented
 
 ## Configuration
 
-DoomHelix reads user config from:
+DoomHelix reuses Helix's normal user config:
 
 ```text
-~/.config/doomhelix/config.toml
+~/.config/helix/config.toml
 ```
+
+Agent settings can live separately in:
+
+```text
+~/.config/helix/agent.toml
+```
+
+Workspace-specific agent settings can live in:
+
+```text
+.helix/agent.toml
+```
+
+`agent.toml` may use bare agent keys, `[agent]`, or `[editor.agent]`.
+Bare keys are the preferred format for this file. Existing `[editor.agent]`
+settings in `config.toml` still work; `agent.toml` layers on top of them.
 
 Minimal Codex config:
 
 ```toml
-[editor.agent]
 enable = true
 name = "codex"
 command = "codex-acp"
@@ -243,7 +258,6 @@ include-diagnostics = true
 Minimal Claude config:
 
 ```toml
-[editor.agent]
 enable = true
 name = "claude"
 command = "claude-code-acp"
@@ -269,7 +283,6 @@ resizes through `:agent resize` apply only to the current editor session.
 ACP servers can use stdio or WebSocket transport.
 
 ```toml
-[editor.agent]
 enable = true
 name = "codex"
 url = "ws://127.0.0.1:9000/acp"
@@ -321,6 +334,9 @@ With this map:
 - press `<space>a a` to apply after confirmation
 - press `<space>a +` or `<space>a -` to resize the agent panel
 
+The installer writes only `agent.toml`. Add keymaps to
+`~/.config/helix/config.toml` or `.helix/config.toml`.
+
 ## Installation
 
 ```sh
@@ -344,4 +360,6 @@ Codex installs `codex-acp`. Claude installs
 so the default install writes to `~/.local` instead of `/usr/local`. Use
 `DOOMHELIX_AGENT=none` when you want to wire a custom ACP-compatible agent
 manually. The installer writes a starter config only when
-`~/.config/doomhelix/config.toml` does not already exist.
+`~/.config/helix/agent.toml` does not already exist.
+
+The old `~/.config/doomhelix` directory is obsolete and is not read.

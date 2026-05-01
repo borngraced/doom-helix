@@ -7,10 +7,10 @@ release_repo=${DOOMHELIX_RELEASE_REPO:-borngraced/doom-helix}
 build_from_source=${DOOMHELIX_BUILD_FROM_SOURCE:-0}
 prefix=${DOOMHELIX_PREFIX:-"$HOME/.local"}
 bin_dir=${DOOMHELIX_BIN_DIR:-"$prefix/bin"}
-share_dir=${DOOMHELIX_SHARE_DIR:-"$prefix/share/doomhelix"}
+share_dir=${DOOMHELIX_SHARE_DIR:-"$prefix/share/helix"}
 runtime_dir=${DOOMHELIX_RUNTIME_DIR:-"$share_dir/runtime"}
-config_dir=${DOOMHELIX_CONFIG_DIR:-"$HOME/.config/doomhelix"}
-config_file=${DOOMHELIX_CONFIG_FILE:-"$config_dir/config.toml"}
+config_dir=${DOOMHELIX_CONFIG_DIR:-"$HOME/.config/helix"}
+agent_config_file=${DOOMHELIX_AGENT_CONFIG_FILE:-"$config_dir/agent.toml"}
 agent_choice=${DOOMHELIX_AGENT:-}
 noninteractive=${DOOMHELIX_NONINTERACTIVE:-0}
 install_codex_acp=${DOOMHELIX_INSTALL_CODEX_ACP:-}
@@ -129,6 +129,14 @@ download() {
 
 sh_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+toml_string() {
+  printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+
+agent_config_parent() {
+  dirname "$agent_config_file"
 }
 
 platform_info() {
@@ -315,17 +323,23 @@ write_default_config() {
     return
   fi
 
-  if [ -e "$config_file" ]; then
-    echo "DoomHelix config already exists; leaving it unchanged:"
-    echo "  $config_file"
+  helix_config_file=$config_dir/config.toml
+  if [ -e "$agent_config_file" ]; then
+    echo "DoomHelix agent config already exists; leaving it unchanged:"
+    echo "  $agent_config_file"
     if [ "$selected_agent" != none ]; then
-      echo "Selected agent backend '$selected_agent' was installed, but your existing config was not changed."
-      echo "Update [editor.agent].name and [editor.agent].command if you want to switch backends."
+      echo "Selected agent backend '$selected_agent' was installed, but your existing agent config was not changed."
+      echo "Update name and command in agent.toml if you want to switch backends."
     fi
     return
   fi
-
-  mkdir -p "$config_dir"
+  if [ -e "$helix_config_file" ] && grep -Eq '^\[editor\.agent\]' "$helix_config_file"; then
+    echo "Helix config already contains [editor.agent]; leaving agent config unchanged:"
+    echo "  $helix_config_file"
+    echo "Move that section to $agent_config_file when you want a separate agent config."
+    return
+  fi
+  mkdir -p "$(agent_config_parent)"
   default_agent=$selected_agent
   if [ "$default_agent" = both ]; then
     default_agent=codex
@@ -336,17 +350,9 @@ write_default_config() {
   fi
 
   {
-    printf '%s\n' 'theme = "amberwood"'
-    printf '%s\n' ''
-    printf '%s\n' '[editor]'
-    printf '%s\n' 'line-number = "relative"'
-    printf '%s\n' 'mouse = true'
-    printf '%s\n' 'true-color = true'
-    printf '%s\n' ''
-    printf '%s\n' '[editor.agent]'
     printf '%s\n' 'enable = true'
-    printf 'name = "%s"\n' "$default_agent"
-    printf 'command = "%s"\n' "$agent_command"
+    printf 'name = %s\n' "$(toml_string "$default_agent")"
+    printf 'command = %s\n' "$(toml_string "$agent_command")"
     printf '%s\n' 'args = []'
     printf '%s\n' 'panel-position = "right"'
     printf '%s\n' 'panel-size = 30'
@@ -355,35 +361,10 @@ write_default_config() {
     printf '%s\n' 'include-command-history = true'
     printf '%s\n' 'include-visible-buffer = true'
     printf '%s\n' 'include-diagnostics = true'
+  } >"$agent_config_file"
 
-    printf '%s\n' ''
-    printf '%s\n' '[keys.normal.space.a]'
-    printf '%s\n' 'c = ":agent chat"'
-    printf '%s\n' 'e = ":agent explain"'
-    printf '%s\n' 'f = ":agent fix"'
-    printf '%s\n' 'r = ":agent refactor"'
-    printf '%s\n' 'E = ":agent edit"'
-    printf '%s\n' 'a = ":agent apply"'
-    printf '%s\n' 'p = ":agent patch"'
-    printf '%s\n' 'P = ":agent panel"'
-    printf '%s\n' 'o = ":agent restore"'
-    printf '%s\n' '"+" = ":agent resize +5"'
-    printf '%s\n' '"-" = ":agent resize -5"'
-    printf '%s\n' 's = ":agent start"'
-    printf '%s\n' 'R = ":agent restart"'
-    printf '%s\n' 'x = ":agent clear"'
-    printf '%s\n' 'S = ":agent status"'
-    printf '%s\n' ''
-    printf '%s\n' '[keys.select.space.a]'
-    printf '%s\n' 'c = ":agent chat"'
-    printf '%s\n' 'e = ":agent explain"'
-    printf '%s\n' 'f = ":agent fix"'
-    printf '%s\n' 'r = ":agent refactor"'
-    printf '%s\n' 'E = ":agent edit"'
-  } >"$config_file"
-
-  echo "Wrote DoomHelix config:"
-  echo "  $config_file"
+  echo "Wrote DoomHelix agent config:"
+  echo "  $agent_config_file"
 }
 
 installed_prebuilt=0
@@ -450,7 +431,7 @@ printf '%s\n' \
   "  $runtime_dir" \
   '' \
   'Config:' \
-  "  $config_file" \
+  "  $agent_config_file" \
   '' \
   'Agent backend:' \
   "  $selected_agent" \

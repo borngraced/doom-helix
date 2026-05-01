@@ -79,17 +79,15 @@
           <p class="eyebrow">Flat config</p>
           <h2>One active agent. No server maze.</h2>
           <p>
-            `command` means stdio. `url` means WebSocket. The default install uses amberwood.
+            Agent settings live in <code>~/.config/helix/agent.toml</code>.
+            Normal Helix theme, editor settings, and keymaps stay in <code>config.toml</code>.
           </p>
         </div>
         <div class="code-box">
           <button class="copy-button" data-copy="#config-snippet">Copy</button>
-          <pre id="config-snippet"><code>theme = "amberwood"
-
-[editor.agent]
-enable = true
-name = "claude"
-command = "claude-code-acp"
+          <pre id="config-snippet"><code>enable = true
+name = "codex"
+command = "codex-acp"
 args = []
 panel-position = "right"
 panel-size = 30</code></pre>
@@ -102,7 +100,8 @@ panel-size = 30</code></pre>
           <h2>Pick Codex, Claude, both, or custom ACP later.</h2>
           <p>
             The installer writes <code>dhx</code>, installs the selected ACP adapter when needed,
-            keeps npm installs under `~/.local`, and leaves existing config files untouched.
+            keeps npm installs under <code>~/.local</code>, and writes only
+            <code>agent.toml</code> when no agent config already exists.
           </p>
         </div>
         <div class="code-box">

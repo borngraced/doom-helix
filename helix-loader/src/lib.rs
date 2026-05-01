@@ -33,8 +33,8 @@ pub fn initialize_log_file(specified_file: Option<PathBuf>) {
 /// The priority is:
 ///
 /// 1. sibling directory to `CARGO_MANIFEST_DIR` (if environment variable is set)
-/// 2. subdirectory of user config directory (always included)
-/// 3. `HELIX_RUNTIME` (if environment variable is set)
+/// 2. `HELIX_RUNTIME` (if environment variable is set)
+/// 3. subdirectory of user config directory (always included)
 /// 4. `HELIX_DEFAULT_RUNTIME` (if environment variable is set *at build time*)
 /// 5. subdirectory of path to helix executable (always included)
 ///
@@ -50,13 +50,13 @@ fn prioritize_runtime_dirs() -> Vec<PathBuf> {
         rt_dirs.push(path);
     }
 
-    let conf_rt_dir = config_dir().join(RT_DIR);
-    rt_dirs.push(conf_rt_dir);
-
     if let Ok(dir) = std::env::var("HELIX_RUNTIME") {
         let dir = path::expand_tilde(Path::new(&dir));
         rt_dirs.push(path::normalize(dir));
     }
+
+    let conf_rt_dir = config_dir().join(RT_DIR);
+    rt_dirs.push(conf_rt_dir);
 
     // If this variable is set during build time, it will always be included
     // in the lookup list. This allows downstream packagers to set a fallback
@@ -121,7 +121,7 @@ pub fn config_dir() -> PathBuf {
     // TODO: allow env var override
     let strategy = choose_base_strategy().expect("Unable to find the config directory!");
     let mut path = strategy.config_dir();
-    path.push("doomhelix");
+    path.push("helix");
     path
 }
 
@@ -129,14 +129,14 @@ pub fn cache_dir() -> PathBuf {
     // TODO: allow env var override
     let strategy = choose_base_strategy().expect("Unable to find the cache directory!");
     let mut path = strategy.cache_dir();
-    path.push("doomhelix");
+    path.push("helix");
     path
 }
 
 pub fn data_dir() -> PathBuf {
     let strategy = choose_base_strategy().expect("Unable to find the data directory!");
     let mut path = strategy.data_dir();
-    path.push("doomhelix");
+    path.push("helix");
     path
 }
 
@@ -150,6 +150,14 @@ pub fn log_file() -> PathBuf {
 
 pub fn workspace_config_file() -> PathBuf {
     find_workspace().0.join(".helix").join("config.toml")
+}
+
+pub fn agent_config_file() -> PathBuf {
+    config_dir().join("agent.toml")
+}
+
+pub fn workspace_agent_config_file() -> PathBuf {
+    find_workspace().0.join(".helix").join("agent.toml")
 }
 
 pub fn workspace_lang_config_file() -> PathBuf {
