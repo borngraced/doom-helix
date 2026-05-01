@@ -101,6 +101,7 @@ pub async fn send_prompt_turn(prompt: String, meta: Option<Value>) -> anyhow::Re
         .expect("session id checked before prompt send");
     let request_id = running.next_request_id;
     running.next_request_id += 1;
+    let turn_prompt = prompt.clone();
     let request = super::acp::prompt_request(request_id, session_id, prompt, meta)?;
     running.process.send(&request).await?;
 
@@ -114,6 +115,7 @@ pub async fn send_prompt_turn(prompt: String, meta: Option<Value>) -> anyhow::Re
             restore_running_agent(running);
             return Ok(AgentTurn {
                 request_id,
+                prompt: turn_prompt,
                 messages,
             });
         }
@@ -144,6 +146,7 @@ pub async fn send_prompt(prompt: String, meta: Option<Value>) -> anyhow::Result<
 #[derive(Debug, serde::Serialize)]
 pub struct AgentTurn {
     pub request_id: u64,
+    pub prompt: String,
     pub messages: Vec<JsonRpcMessage>,
 }
 

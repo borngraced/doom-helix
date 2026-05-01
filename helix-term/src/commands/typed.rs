@@ -760,6 +760,8 @@ fn open_agent_scratch_editor(
 
 fn agent_turn_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyhow::Result<String> {
     let mut output = String::new();
+    writeln!(output, "**You:** {}", turn.prompt)?;
+    output.push_str("\n\n**Codex:**\n\n");
 
     for message in &turn.messages {
         let value = serde_json::to_value(message)?;
@@ -792,16 +794,15 @@ fn agent_turn_markdown(turn: &crate::agent::runtime::AgentTurn) -> anyhow::Resul
             "agent_thought_chunk" => {
                 writeln!(output, "\n\n> {text}")?;
             }
-            "user_message_chunk" => {
-                writeln!(output, "\n\n**User:** {text}")?;
-            }
+            "user_message_chunk" => {}
             _ => {
                 writeln!(output, "\n\n`{update_kind}`: {text}")?;
             }
         }
     }
 
-    if output.trim().is_empty() {
+    let empty_response = output.trim_end() == format!("**You:** {}\n\n**Codex:**", turn.prompt);
+    if empty_response {
         output = serde_json::to_string_pretty(turn)?;
     }
 
