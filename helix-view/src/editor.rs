@@ -458,7 +458,7 @@ pub struct AgentServerConfig {
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentLaunchConfig {
     pub name: String,
     pub command: String,

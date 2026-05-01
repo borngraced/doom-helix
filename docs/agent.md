@@ -22,6 +22,10 @@ Opens a new agent session scratch buffer. The session currently contains a gener
 
 Opens a dry-run ACP handshake payload as JSON. The payload currently previews the `initialize` and `session/new` messages Helix would send to an ACP-compatible agent process. Helix-specific session context is attached under ACP's `_meta` extension field.
 
+`:agent launch-config`
+
+Opens the resolved default agent launch config from the active editor config.
+
 `:agent-context`
 
 Compatibility command that opens the same context snapshot directly.
