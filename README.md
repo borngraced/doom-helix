@@ -89,11 +89,25 @@ The installer places:
 - `dhx-bin` to `~/.local/bin/dhx-bin`
 - selected ACP adapter binaries when requested
 - runtime files to `~/.local/share/helix/runtime`
+- a `runtime` symlink next to `dhx-bin` so DoomHelix works without an existing Helix install
 - starter agent config at `~/.config/helix/agent.toml` if one does not already exist
+
+DoomHelix relies on normal Helix runtime lookup order. That means existing
+Helix users keep their `~/.config/helix/runtime` overrides, while fresh installs
+still work through the bundled sibling `runtime/` directory.
 
 Override install paths with `DOOMHELIX_PREFIX`, `DOOMHELIX_BIN_DIR`, or
 `DOOMHELIX_RUNTIME_DIR`. Override the agent config destination with
 `DOOMHELIX_CONFIG_DIR` or `DOOMHELIX_AGENT_CONFIG_FILE`.
+
+On macOS, the generated `dhx` wrapper keeps a conservative PATH and only adds
+the PATH from the environment used to run `install.sh`. If your language
+servers live in user-local directories, run the installer with the PATH you
+want baked into the wrapper:
+
+```sh
+PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH" sh install.sh
+```
 
 Force a local source build:
 
