@@ -416,6 +416,9 @@ install_claude_acp
 write_default_config
 {
   printf '%s\n' '#!/bin/sh'
+  printf '%s\n' 'if [ "$(uname -s)" = Darwin ]; then'
+  printf '%s\n' '  export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"'
+  printf '%s\n' 'fi'
   printf 'HELIX_RUNTIME=%s exec %s "$@"\n' "$(sh_quote "$runtime_dir")" "$(sh_quote "$bin_dir/dhx-bin")"
 } >"$bin_dir/dhx"
 chmod 755 "$bin_dir/dhx"
