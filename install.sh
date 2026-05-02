@@ -420,7 +420,7 @@ if [ "$installed_prebuilt" = 0 ]; then
 
   cd "$source_dir"
 
-  cargo build --release -p helix-term --bin dhx
+  env -u HELIX_DISABLE_AUTO_GRAMMAR_BUILD cargo build --release -p helix-term --bin dhx
 
   mkdir -p "$bin_dir" "$share_dir"
   install -m 755 target/release/dhx "$bin_dir/dhx-bin"
