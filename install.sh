@@ -34,6 +34,22 @@ copy_dir() {
   tar -C "$src" -cf - . | tar -C "$dest" -xf -
 }
 
+link_runtime_into_bin_dir() {
+  linked_runtime_dir=$bin_dir/runtime
+
+  mkdir -p "$bin_dir"
+
+  if [ -L "$linked_runtime_dir" ]; then
+    rm -f "$linked_runtime_dir"
+  elif [ -e "$linked_runtime_dir" ]; then
+    echo "warning: $linked_runtime_dir already exists; leaving it unchanged." >&2
+    echo "DoomHelix will rely on Helix's normal runtime lookup order." >&2
+    return
+  fi
+
+  ln -s "$runtime_dir" "$linked_runtime_dir"
+}
+
 need install
 need tar
 
@@ -389,7 +405,7 @@ if [ "$installed_prebuilt" = 0 ]; then
 
   cd "$source_dir"
 
-  cargo build --release -p helix-term --bin dhx
+  env -u HELIX_DISABLE_AUTO_GRAMMAR_BUILD cargo build --release -p helix-term --bin dhx
 
   mkdir -p "$bin_dir" "$share_dir"
   install -m 755 target/release/dhx "$bin_dir/dhx-bin"
@@ -399,12 +415,16 @@ fi
 install_codex_acp
 install_claude_acp
 write_default_config
+link_runtime_into_bin_dir
 {
   printf '%s\n' '#!/bin/sh'
   printf '%s\n' 'if [ "$(uname -s)" = Darwin ]; then'
-  printf '%s\n' '  export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"'
+  printf '%s\n' '  if [ -x /usr/libexec/path_helper ]; then'
+  printf '%s\n' '    eval "$(/usr/libexec/path_helper -s)"'
+  printf '%s\n' '  fi'
+  printf '  export PATH=%s\n' "$(sh_quote "$PATH")"
   printf '%s\n' 'fi'
-  printf 'HELIX_RUNTIME=%s exec %s "$@"\n' "$(sh_quote "$runtime_dir")" "$(sh_quote "$bin_dir/dhx-bin")"
+  printf 'exec %s "$@"\n' "$(sh_quote "$bin_dir/dhx-bin")"
 } >"$bin_dir/dhx"
 chmod 755 "$bin_dir/dhx"
 
@@ -415,8 +435,14 @@ printf '%s\n' \
   "  $bin_dir/dhx" \
   "  $bin_dir/dhx-bin" \
   '' \
-  'Runtime:' \
+  'Managed runtime:' \
   "  $runtime_dir" \
+  '' \
+  'Sibling runtime link:' \
+  "  $bin_dir/runtime" \
+  '' \
+  'Runtime lookup:' \
+  '  normal Helix order (user/runtime overrides still apply)' \
   '' \
   'Config:' \
   "  $agent_config_file" \

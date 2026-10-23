@@ -23,6 +23,7 @@ env:
 jobs:
   fetch-grammars:
     name: Fetch Grammars
+    if: github.repository == 'helix-editor/helix'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -46,6 +47,7 @@ jobs:
 
   dist:
     name: Dist
+    if: github.repository == 'helix-editor/helix'
     needs: [fetch-grammars]
     env:
       # For some builds, we use cross to test on 32-bit and big-endian
@@ -234,6 +236,7 @@ jobs:
 
   publish:
     name: Publish
+    if: github.repository == 'helix-editor/helix'
     needs: [dist]
     runs-on: ubuntu-latest
     steps:
