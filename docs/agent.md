@@ -5,18 +5,16 @@ separate chat window: it receives structured editor context, streams into a
 real buffer, asks for approval before sensitive work, and produces patches that
 can be reviewed and applied without leaving the editor.
 
-The integration relies on ACP, the Agent Client Protocol used by Zed's agent
-integration. The default supported Codex path uses Zed's `codex-acp` adapter:
-it speaks ACP to DoomHelix and talks to Codex through Codex's long-lived
-`app-server` protocol. That gives DoomHelix one persistent backend thread
-across editor turns instead of spawning a fresh `codex exec` process for every
-prompt.
+DoomHelix connects to Codex through
+[`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp).
+The `codex-acp` command keeps the conversation open between prompts and
+includes a compatible Codex version.
 
 ## Features
 
 - Prompt-backed chat with streamed responses.
 - ACP transport compatible with stdio and WebSocket agent servers.
-- Default Codex support through Zed's `codex-acp` adapter.
+- Codex support through `@agentclientprotocol/codex-acp`.
 - `explain`, `fix`, `refactor`, and `edit` commands for selected code.
 - Active-file context for normal chat, even when the cursor is in the agent
   panel.
@@ -211,10 +209,6 @@ command execution or file changes, `codex-acp` sends
 `session/request_permission`; DoomHelix shows a `[y/N]` prompt with the request
 details and sends the selected ACP permission option back to the agent.
 
-This is why DoomHelix uses the ACP `codex-acp` adapter instead of shelling out
-to `codex exec`. Plain `codex exec` is not a good editor backend for
-interactive approval because it is process-oriented rather than session-oriented.
-
 ## Configuration
 
 DoomHelix reuses Helix's normal user config:
@@ -339,6 +333,8 @@ The installer writes only `agent.toml`. Add keymaps to
 
 ## Installation
 
+Install Node.js and npm first if you want to use Codex or Claude.
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
 ```
@@ -354,12 +350,33 @@ curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.
 curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | DOOMHELIX_AGENT=none sh
 ```
 
-Codex installs `codex-acp`. Claude installs
-`@zed-industries/claude-code-acp` through npm and expects
-`claude-code-acp` on `PATH`. The npm install uses DoomHelix's install prefix,
-so the default install writes to `~/.local` instead of `/usr/local`. Use
-`DOOMHELIX_AGENT=none` when you want to wire a custom ACP-compatible agent
-manually. The installer writes a starter config only when
-`~/.config/helix/agent.toml` does not already exist.
+Codex installs `@agentclientprotocol/codex-acp` as `codex-acp`. Claude installs
+`@zed-industries/claude-code-acp` as `claude-code-acp`. Both use npm and install
+under `~/.local` by default. Make sure `~/.local/bin` is on your `PATH`.
+Existing agent installations are left unchanged. Use `DOOMHELIX_AGENT=none`
+to install only the editor. The installer creates `~/.config/helix/agent.toml`
+if you choose an agent and have no existing agent settings.
+
+## Update Codex
+
+For the default installation:
+
+```sh
+npm install -g --prefix "$HOME/.local" @agentclientprotocol/codex-acp
+codex-acp --version
+```
+
+Then run `:agent restart` inside DoomHelix.
+
+If you have the old standalone `codex-acp` binary, remove it before running
+the npm command:
+
+```sh
+rm "$HOME/.local/bin/codex-acp"
+```
+
+The old binary can fail with `unknown variant max` when loading available
+models. Updating the separate `codex` command does not update that binary.
+Your `agent.toml` can keep `command = "codex-acp"`.
 
 The old `~/.config/doomhelix` directory is obsolete and is not read.

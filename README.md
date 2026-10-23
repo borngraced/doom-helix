@@ -18,7 +18,7 @@ attached automatically.
 ## Highlights
 
 - Long-lived ACP agent sessions through `codex-acp`.
-- Uses the Agent Client Protocol path pioneered by Zed's agent integration.
+- Codex and Claude support.
 - Streaming transcript panel inside the editor.
 - Prompt UI for chat and coding actions.
 - Selection-aware `explain`, `fix`, `refactor`, and `edit` commands.
@@ -61,6 +61,8 @@ See [docs/agent.md](docs/agent.md) for the full command, configuration, and
 keymap reference.
 
 ## Install
+
+Install Node.js and npm first if you want to use Codex or Claude.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/borngraced/doom-helix/main/install.sh | sh
@@ -123,12 +125,13 @@ keymaps in Helix's normal `config.toml`.
 
 ## Agent Backend
 
-DoomHelix talks to agents over ACP, the Agent Client Protocol used by Zed's
-agent integration. Codex uses Zed's `codex-acp` adapter, which bridges
-DoomHelix's ACP client to Codex's long-lived app-server backend. Claude uses
-Zed's `@zed-industries/claude-code-acp` adapter, installed as
-`claude-code-acp`. The installer installs npm-based adapters under DoomHelix's
-install prefix, so the default install stays inside `~/.local`.
+Codex uses [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp),
+installed as `codex-acp`. It includes a compatible Codex version. Claude uses
+`@zed-industries/claude-code-acp`, installed as `claude-code-acp`.
+Both install under `~/.local` by default.
+
+If Codex reports `unknown variant max`, follow the
+[Codex update steps](docs/agent.md#update-codex).
 
 ## Upstream
 

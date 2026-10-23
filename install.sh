@@ -14,7 +14,7 @@ agent_config_file=${DOOMHELIX_AGENT_CONFIG_FILE:-"$config_dir/agent.toml"}
 agent_choice=${DOOMHELIX_AGENT:-}
 noninteractive=${DOOMHELIX_NONINTERACTIVE:-0}
 install_codex_acp=${DOOMHELIX_INSTALL_CODEX_ACP:-}
-codex_acp_version=${CODEX_ACP_VERSION:-0.12.0}
+codex_acp_version=${CODEX_ACP_VERSION:-2.2.2}
 claude_acp_package=${CLAUDE_ACP_PACKAGE:-@zed-industries/claude-code-acp@0.16.2}
 claude_acp_command=${CLAUDE_ACP_COMMAND:-claude-code-acp}
 
@@ -147,7 +147,7 @@ platform_info() {
     x86_64|amd64) arch=x86_64 ;;
     aarch64|arm64) arch=aarch64 ;;
     *)
-      echo "error: unsupported architecture for codex-acp: $arch" >&2
+      echo "error: unsupported architecture for DoomHelix: $arch" >&2
       exit 1
       ;;
   esac
@@ -162,7 +162,7 @@ platform_info() {
       ext=tar.gz
       ;;
     *)
-      echo "error: unsupported OS for codex-acp: $os" >&2
+      echo "error: unsupported OS for DoomHelix: $os" >&2
       exit 1
       ;;
   esac
@@ -246,45 +246,30 @@ install_codex_acp() {
     return
   fi
 
+  if [ -x "$bin_dir/codex-acp" ]; then
+    echo "codex-acp already installed at $bin_dir/codex-acp; leaving it unchanged."
+    return
+  fi
+
   if command -v codex-acp >/dev/null 2>&1; then
     echo "codex-acp already available on PATH; leaving it unchanged."
     return
   fi
 
-  set -- $(platform_info)
-  arch=$1
-  platform=$2
-  ext=$3
-  asset="codex-acp-${codex_acp_version}-${arch}-${platform}.${ext}"
-  url="https://github.com/zed-industries/codex-acp/releases/download/v${codex_acp_version}/${asset}"
-  tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/codex-acp.XXXXXX")
-
-  echo "Installing codex-acp v${codex_acp_version}..."
-  if ! download "$url" "$tmp_dir/$asset"; then
-    rm -rf "$tmp_dir"
-    echo "error: failed to download codex-acp from $url" >&2
-    echo "Set DOOMHELIX_AGENT=none or DOOMHELIX_INSTALL_CODEX_ACP=0 to skip this step." >&2
-    exit 1
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "warning: npm was not found; skipping Codex agent install." >&2
+    echo "Install Node.js/npm, then run:" >&2
+    echo "  npm install -g --prefix \"$prefix\" @agentclientprotocol/codex-acp@${codex_acp_version}" >&2
+    return
   fi
 
-  case "$ext" in
-    tar.gz) tar -xzf "$tmp_dir/$asset" -C "$tmp_dir" ;;
-    *)
-      rm -rf "$tmp_dir"
-      echo "error: unsupported codex-acp archive extension: $ext" >&2
-      exit 1
-      ;;
-  esac
+  echo "Installing Codex agent v${codex_acp_version} under $prefix..."
+  npm install -g --prefix "$prefix" "@agentclientprotocol/codex-acp@${codex_acp_version}"
 
-  codex_acp_bin=$(find "$tmp_dir" -type f -name codex-acp -perm -111 | head -n 1)
-  if [ -z "$codex_acp_bin" ]; then
-    rm -rf "$tmp_dir"
-    echo "error: codex-acp binary not found in downloaded archive" >&2
-    exit 1
+  if [ "$bin_dir" != "$prefix/bin" ] && [ ! -e "$bin_dir/codex-acp" ] && [ -x "$prefix/bin/codex-acp" ]; then
+    mkdir -p "$bin_dir"
+    ln -s "$prefix/bin/codex-acp" "$bin_dir/codex-acp"
   fi
-
-  install -m 755 "$codex_acp_bin" "$bin_dir/codex-acp"
-  rm -rf "$tmp_dir"
 }
 
 install_claude_acp() {
